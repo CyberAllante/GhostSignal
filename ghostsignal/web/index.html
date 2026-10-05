@@ -249,7 +249,7 @@
     <a href="#/setup" data-p="setup"><svg class="i"><use href="#i-set"/></svg><span class="label">Setup</span><span class="badge" id="navSetup"></span></a>
   </nav>
   <div class="foot">
-    <a href="#" id="scanBtn"><svg class="i"><use href="#i-scan"/></svg><span class="label">Run scan</span></a>
+    <a href="#" id="scanBtn"><svg class="i"><use href="#i-scan"/></svg><span class="label">Refresh data</span></a>
   </div>
 </aside>
 
@@ -342,53 +342,57 @@ const thumb = (p) => p.image_url ? `<span class="thumb" style="background-image:
 async function loadProducts() { products = await api("/api/products"); $("#navProducts").textContent = products.length || ""; }
 const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><div class="top"><span class="chip ${c}">${icon(ic)}</span><svg class="i" style="color:#d1d5db;width:16px"><use href="#i-arrow"/></svg></div><div class="n">${n}</div><div class="l">${l}</div></a>`;
 
+const sub = (p) => {
+  const e = p.economics, s = p.snapshot || {}, bits = [];
+  if (e.sale_price) bits.push(`Sells ${money(e.sale_price)}`);
+  if (s.sales_rank) bits.push(`#${num(s.sales_rank)} rank`);
+  if (s.offer_count != null) bits.push(`${s.offer_count} sellers`);
+  if (e.cost) bits.push(`${money(e.profit)} profit`); else if (e.max_cost) bits.push(`buy under ${money(e.max_cost)}`);
+  return bits.join(" · ") || "No market data yet";
+};
+
 async function pageDashboard() {
   const seq = routeSeq;
-  const [, stats, changes, setup, demo, out] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup"), api("/api/demo"), api("/api/outcomes")]);
-  const ordersDone = setup.items.find((i) => i.key === "orders")?.done;
-  const buys = products.filter((p) => p.verdict === "BUY").length, res = products.filter((p) => p.verdict === "RESEARCH").length;
-  const top = products.filter((p) => p.verdict !== "PASS").slice(0, 8);
-  const done = setup.items.filter((i) => i.done).length;
+  const [, stats, changes, demo, out, ung, st] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/demo"), api("/api/outcomes"), api("/api/ungate"), api("/api/refresh/status")]);
+  const live = products.filter((p) => !p.restricted);
+  const count = (g) => live.filter((p) => p.gated === g).length;
+  const withData = live.filter((p) => p.economics.sale_price).length;
+  const rankOf = (p) => p.snapshot?.sales_rank || 1e12;
+  const sellNow = live.filter((p) => p.gated === "ungated").sort((a, b) => rankOf(a) - rankOf(b)).slice(0, 8);
+  const approvals = [...ung.categories.map((g) => ({ ...g, kind: "Category" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "Brand" }))]
+    .sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
+  const row = (p) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}
+      <div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${sub(p)}</div></div>
+      ${p.economics.sale_price ? `<b style="white-space:nowrap">${money(p.economics.sale_price)}</b>` : ""}</div>`;
   if (!paint(seq, `
     ${demo.has_demo ? `<div class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:#fcd34d;background:#fffbeb">
       <div><b>You're looking at sample data.</b> <span style="color:var(--muted)">None of this is real. Clear it, then import your own.</span></div>
       <button class="btn" onclick="clearDemo()">Clear sample data</button></div>` : ""}
-    ${!ordersDone ? `<div class="card" style="padding:20px;margin-bottom:24px">
-      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center">
-        <div><div style="font-weight:600;font-size:16px">Start here: import Amazon order history</div>
-        <div style="color:var(--muted);margin-top:2px">Everything gets built from the orders you give it: products, who bought what, how often. Then the store prices, fees and scores fill in.</div></div>
-        <button class="btn primary" onclick="$('#dlgOrders').showModal()">${icon("plus")}Import orders</button></div></div>` : ""}
-    <div class="page-head"><div><h1>Dashboard</h1><p>Last scan ${ago(stats.last_run)}</p></div>
-      <div class="actions"><button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button><button class="btn" onclick="openAdd()">${icon("plus")}Add products</button><button class="btn primary" onclick="scan()">${icon("scan")}Run scan</button></div></div>
+    <div class="page-head"><div><h1>Dashboard</h1><p>${st.running ? "Pulling fresh data from Amazon now…" : `Data updated ${ago(st.last_run || stats.last_run)}`}</p></div>
+      <div class="actions"><button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
     <div class="stats">
-      ${statCard("green", "cart", buys, "Buy now", "#/products?v=BUY")}
-      ${statCard("orange", "eye", res, "To research", "#/products?v=RESEARCH")}
-      ${statCard("blue", "box", stats.products, "Products tracked", "#/products?v=")}
-      ${statCard("purple", "cart", stats.inventory_units, `In inventory · ${money(stats.inventory_cost)}`, "#/inventory")}
+      ${statCard("green", "check", count("ungated"), "You can sell now", "#/products?g=ungated")}
+      ${statCard("orange", "eye", count("approval"), "Need approval", "#/ungate")}
+      ${statCard("blue", "box", live.length, `Products · ${withData} with market data`, "#/products?v=")}
+      ${statCard("purple", "users", stats.orders, `Order lines · ${stats.buyers} ${stats.buyers === 1 ? "buyer" : "buyers"}`, "#/products?v=")}
     </div>
     <div class="grid2">
-      <div class="card"><div class="card-h"><div><h2>Top opportunities</h2><p>Best scores right now</p></div><a class="btn sm" href="#/products?v=">View all</a></div>
-        <div class="card-b">${top.length ? top.map((p) => `
-          <div class="mini-row" data-asin="${p.asin}">
-            <span class="pill ${p.verdict}">${p.score}</span>
-            <div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${money(p.economics.profit)} profit · ${pct(p.economics.roi)} ROI · ${num(p.snapshot?.monthly_sold)}/mo · ${esc(p.best_source?.retailer || "no store yet")}</div></div>
-            ${gatedPill(p)}
-          </div>`).join("") : `<div class="empty">No products yet. Click <b>Add products</b>.</div>`}</div></div>
+      <div class="card"><div class="card-h"><div><h2>Best you can sell now</h2><p>Ungated for your account, highest demand first</p></div><a class="btn sm" href="#/products?g=ungated">View all</a></div>
+        <div class="card-b">${sellNow.length ? sellNow.map(row).join("") : `<div class="empty">Nothing ungated yet. Refresh data to run the gated check.</div>`}</div></div>
       <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
-        <div class="card"><div class="card-h"><div><h2>Moved up</h2><p>Got better on the latest scan</p></div></div>
-          <div class="card-b">${changes.length ? changes.map((c) => `
-            <div class="mini-row" data-asin="${c.asin}"><div style="flex:1;min-width:0"><div class="t">${esc(c.title || c.asin)}</div>
-            <div class="s">${LABEL[c.from]} → <b class="${c.to === "BUY" ? "pos" : ""}">${LABEL[c.to]}</b> · ${ago(c.at)}</div></div></div>`).join("") : `<div class="hint">Nothing yet. Products that get better show up here.</div>`}</div></div>
-        <div class="card"><div class="card-h"><div><h2>Setup</h2><p>${done} of ${setup.items.length} done</p></div><a class="btn sm" href="#/setup">Open</a></div>
-          <div class="card-b"><div style="height:8px;background:var(--row);border-radius:99px;overflow:hidden"><div style="height:100%;width:${(done / setup.items.length) * 100}%;background:var(--navy)"></div></div>
-          <div class="hint" style="margin-top:8px">Next: ${esc(setup.items.find((i) => !i.done)?.label || "All set")}</div></div></div>
+        <div class="card"><div class="card-h"><div><h2>Approvals worth getting</h2><p>Unlock the most strong products</p></div><a class="btn sm" href="#/ungate">Open</a></div>
+          <div class="card-b">${approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" style="color:inherit;text-decoration:none">
+            <div style="flex:1;min-width:0"><div class="t">${esc(g.name)}</div><div class="s">${g.kind} · ${g.products} products${g.strong ? ` · <b class="pos">${g.strong} strong</b>` : ""}</div></div></a>`).join("")
+            : `<div class="hint">Run a data refresh so gating is checked.</div>`}</div></div>
+        ${changes.length ? `<div class="card"><div class="card-h"><div><h2>Moved up</h2><p>Got better on the latest scan</p></div></div>
+          <div class="card-b">${changes.map((c) => `<div class="mini-row" data-asin="${c.asin}"><div style="flex:1;min-width:0"><div class="t">${esc(c.title || c.asin)}</div>
+            <div class="s">${LABEL[c.from]} → <b class="${c.to === "BUY" ? "pos" : ""}">${LABEL[c.to]}</b> · ${ago(c.at)}</div></div></div>`).join("")}</div></div>` : ""}
       </div>
     </div>
-    <div class="card" style="margin-top:24px"><div class="card-h"><div><h2>How your buys performed</h2><p>What the app predicted when you bought, against what actually happened</p></div></div>
-      <div class="card-b">${out.sold_lots ? `<table><thead><tr><th>Verdict when you bought</th><th class="num">Lots sold</th><th class="num">Made money</th><th class="num">Win rate</th><th class="num">Predicted</th><th class="num">Actual</th></tr></thead><tbody>
-        ${Object.entries(out.by_verdict).map(([v, d]) => `<tr><td>${LABEL[v] || "Not scored"}</td><td class="num">${d.lots}</td><td class="num">${d.wins}</td><td class="num">${pct(d.win_rate)}</td><td class="num">${d.predicted_n ? money(d.predicted) : "—"}</td><td class="num ${cls(d.profit)}">${money(d.profit)}</td></tr>`).join("")}</tbody></table>
-        <div class="hint" style="margin-top:8px">Total profit ${money(out.total_profit)}. If Buy lots win more than Research lots, the scoring is working.</div>`
-        : `<div class="hint">Nothing sold yet. Use <b>I bought this</b> on a product, then mark it Sold in Inventory. After a few sales this shows which verdicts actually make money.</div>`}</div></div>`)) return;
+    ${out.sold_lots ? `<div class="card" style="margin-top:24px"><div class="card-h"><div><h2>How your buys performed</h2><p>What the app predicted when you bought, against what actually happened</p></div></div>
+      <div class="card-b"><div class="table-wrap"><table><thead><tr><th>Verdict when you bought</th><th class="num">Lots sold</th><th class="num">Made money</th><th class="num">Win rate</th><th class="num">Predicted</th><th class="num">Actual</th></tr></thead><tbody>
+        ${Object.entries(out.by_verdict).map(([v, d]) => `<tr><td>${LABEL[v] || "Not scored"}</td><td class="num">${d.lots}</td><td class="num">${d.wins}</td><td class="num">${pct(d.win_rate)}</td><td class="num">${d.predicted_n ? money(d.predicted) : "—"}</td><td class="num ${cls(d.profit)}">${money(d.profit)}</td></tr>`).join("")}</tbody></table></div>
+        <div class="hint" style="margin-top:8px">Total profit ${money(out.total_profit)}.</div></div></div>` : ""}`)) return;
 }
 
 const COLS = [
@@ -404,6 +408,7 @@ const NUMCOLS = new Set(["sell", "cost", "max", "profit", "roi", "sold", "rank",
 async function pageProducts(params) {
   const seq = routeSeq;
   if (params.has("v")) view.verdict = params.get("v");
+  if (params.has("g")) { view.gated = params.get("g"); view.verdict = ""; }
   await loadProducts();
   if (!paint(seq, `
     <div class="page-head"><div><h1>Products</h1><p>Every product you're watching. Click a row for details.</p></div>
@@ -746,7 +751,7 @@ async function copyAsins() {
 }
 async function scan() {
   const r = await api("/api/refresh", {});
-  toast(r.started ? "Pulling fresh data from Amazon. This takes a few minutes; the page updates as it goes." : "A data pull is already running.");
+  toast(r.started ? "Pulling fresh data from Amazon. This takes a while; the page updates when it's done." : "A data pull is already running.");
   const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); route(); } }, 10000);
 }
 async function refreshSellers(b) {
