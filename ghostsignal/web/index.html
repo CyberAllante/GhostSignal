@@ -245,6 +245,7 @@
     <a href="#/products" data-p="products"><svg class="i"><use href="#i-box"/></svg><span class="label">Products</span><span class="badge" id="navProducts"></span></a>
     <a href="#/inventory" data-p="inventory"><svg class="i"><use href="#i-cart"/></svg><span class="label">Inventory</span><span class="badge" id="navInv"></span></a>
     <a href="#/sellers" data-p="sellers"><svg class="i"><use href="#i-users"/></svg><span class="label">Sellers</span><span class="badge" id="navSellers"></span></a>
+    <a href="#/friends" data-p="friends"><svg class="i"><use href="#i-users"/></svg><span class="label">Friends</span></a>
     <a href="#/ungate" data-p="ungate"><svg class="i"><use href="#i-check"/></svg><span class="label">Ungate</span></a>
     <a href="#/setup" data-p="setup"><svg class="i"><use href="#i-set"/></svg><span class="label">Setup</span><span class="badge" id="navSetup"></span></a>
   </nav>
@@ -527,6 +528,30 @@ async function pageInventory() {
   }));
 }
 
+async function pageFriends() {
+  const seq = routeSeq;
+  const list = await api("/api/invites");
+  const link = (c) => `${location.origin}/contribute?c=${c}`;
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Friends</h1><p>Give each person their own link. They share their Amazon orders; it can only add data, never read it.</p></div></div>
+    <div class="card" style="margin-bottom:24px;padding:20px">
+      <form class="inline-form" id="invForm" style="margin:0"><input name="label" placeholder="Their nickname (e.g. jess)" required style="flex:1;min-width:180px"><button class="btn primary">${icon("plus")}Create link</button></form>
+      <div class="hint" style="margin-top:8px">Their orders are filed under this nickname. Only invite people who agree to share.</div></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Nickname</th><th class="num">Order lines</th><th>Created</th><th>Link</th><th></th></tr></thead><tbody>
+      ${list.length ? list.map((r) => `<tr><td><b>${esc(r.label)}</b></td><td class="num">${r.orders}</td><td class="dim">${ago(r.created)}</td>
+        <td class="dim" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(link(r.code))}</td>
+        <td class="num"><button class="btn sm" data-copy="${r.code}">Copy link</button> <button class="btn sm" data-revoke="${r.code}">Turn off</button></td></tr>`).join("")
+        : `<tr><td colspan="5"><div class="empty">No links yet. Create one above.</div></td></tr>`}</tbody></table></div></div>`)) return;
+  $("#invForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api("/api/invites", { label: new FormData(e.target).get("label") });
+    try { await navigator.clipboard.writeText(link(r.code)); toast("Link created and copied"); } catch { toast("Link created"); }
+    pageFriends();
+  };
+  $("#main").querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(link(b.dataset.copy)); toast("Copied"); } catch { prompt("Copy this link:", link(b.dataset.copy)); } }));
+  $("#main").querySelectorAll("[data-revoke]").forEach((b) => (b.onclick = async () => { if (!confirm("Turn off this link? Their past orders stay.")) return; await api("/api/invites/revoke", { code: b.dataset.revoke }); toast("Link turned off"); pageFriends(); }));
+}
+
 async function pageUngate() {
   const seq = routeSeq;
   const t = await api("/api/ungate");
@@ -785,7 +810,7 @@ $("#sellerGo").onclick = async () => {
 };
 
 /* ---------- routing ---------- */
-const PAGES = { dashboard: pageDashboard, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, setup: pageSetup };
+const PAGES = { dashboard: pageDashboard, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, friends: pageFriends, setup: pageSetup };
 function current() { const [p, qs] = (location.hash.slice(2) || "dashboard").split("?"); return [PAGES[p] ? p : "dashboard", new URLSearchParams(qs || "")]; }
 function rerender() { const [p] = current(); if (p === "products") renderTable(); else if (p === "dashboard") pageDashboard(); else if (p === "inventory") pageInventory(); }
 async function route() {
