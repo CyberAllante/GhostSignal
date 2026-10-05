@@ -61,6 +61,7 @@ class Signal:
     reasons: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     best_source: dict | None = None
+    gated: str = "unknown"            # ungated | approval | blocked | unknown
 
 
 def referral_rate(category: str | None, price: float, default: float = 0.15) -> float:
@@ -101,7 +102,8 @@ def _clamp(x: float) -> float:
 
 
 def score_product(product: dict, snapshot: dict | None, sources: list[dict], orders: dict,
-                  enrichment: dict | None = None, cfg: Config | None = None) -> Signal:
+                  enrichment: dict | None = None, cfg: Config | None = None,
+                  eligibility: dict | None = None) -> Signal:
     cfg = cfg or Config()
     snap = snapshot or {}
     reasons: list[str] = []
@@ -180,12 +182,23 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
         elif drift > 0.15:
             flags.append(f"Price {drift:.0%} above 90d avg — may be a temporary spike")
 
-    # --- AI enrichment risk flags ---
+    # --- Can you actually sell it? Confirmed status (Amazon SP-API or you) beats the AI guess. ---
     e = enrichment or {}
     penalty = 0
-    if e.get("gating_risk") == "high":
-        flags.append("Likely gated / brand-restricted — check eligibility")
+    gated = (eligibility or {}).get("status") or "unknown"
+    if gated == "ungated":
+        reasons.append("You can sell this (ungated)")
+    elif gated == "approval":
+        flags.append("Gated — you need approval to sell this")
+        penalty += 10
+    elif gated == "blocked":
+        flags.append("You can't sell this on your account")
+    elif e.get("gating_risk") == "high":
+        flags.append("Likely gated — check eligibility before buying")
         penalty += 15
+    elif e.get("gating_risk") == "medium":
+        flags.append("Might be gated — check eligibility")
+        penalty += 5
     if e.get("hazmat_risk") == "high":
         flags.append("Possible hazmat")
         penalty += 10
@@ -208,4 +221,10 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     else:
         verdict = "PASS"
 
-    return Signal(score, verdict, econ, reasons, flags, best)
+    # Gating overrides: never tell you to BUY something you can't list.
+    if gated == "blocked":
+        verdict = "PASS"
+    elif gated == "approval" and verdict == "BUY":
+        verdict = "RESEARCH"
+
+    return Signal(score, verdict, econ, reasons, flags, best, gated)

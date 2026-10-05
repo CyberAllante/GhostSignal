@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from . import db, engine, importers
 
 WEB = Path(__file__).parent / "web"
-ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot))?$")
+ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated))?$")
 ORDER = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 
 
@@ -88,6 +88,10 @@ def make_handler(db_path):
                     conn.execute("UPDATE products SET status = ? WHERE asin = ?", (body["status"], m.group(1)))
                     conn.commit()
                     return self._send(200, {"ok": True})
+                if m and m.group(2) == "gated":
+                    db.set_eligibility(conn, m.group(1), body["status"], "manual")
+                    conn.commit()
+                    return self._send(200, engine.product_view(conn, m.group(1)))
                 if m and m.group(2) == "snapshot":
                     db.add_snapshot(conn, m.group(1), "manual", **{k: v for k, v in body.items() if v not in ("", None)})
                     conn.commit()

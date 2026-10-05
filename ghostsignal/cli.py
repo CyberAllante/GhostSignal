@@ -17,6 +17,10 @@
   gs export asins [--verdict RESEARCH]     ASIN list to paste into Stealth Seller / Keepa
   gs export csv [-o out.csv]               full table
   gs serve [--port 8787]                   dashboard
+  gs setup                                 what's connected and what's left to do
+  gs gated ASIN ungated|approval|blocked   record whether you can sell it
+  gs check-gated [--all]                   real gated check via Amazon SP-API
+  gs fees                                  real Amazon fees via SP-API
 """
 
 from __future__ import annotations
@@ -147,12 +151,87 @@ def cmd_run(a):
         stale = _stale_asins(conn, a.stale_days)
         if stale:
             print("keepa:", keepa.refresh(conn, stale))
+    from . import spapi
+    if spapi.configured():
+        unchecked = _unchecked_gated(conn)
+        if unchecked:
+            print("gated check:", spapi.check_gated(conn, unchecked))
+        print("fees updated:", spapi.update_fees(conn, _live_asins(conn)))
     if os.environ.get("ANTHROPIC_API_KEY"):
         from . import enrich
         print("enriched:", enrich.enrich(conn))
     changes = engine.run(conn)
     print(f"{len(changes)} alert(s)")
     engine.send_alerts(changes)
+
+
+def _live_asins(conn):
+    return [r[0] for r in conn.execute("SELECT asin FROM products WHERE status NOT IN ('dead','pass')")]
+
+
+def _unchecked_gated(conn, days=30):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return [r[0] for r in conn.execute(
+        """SELECT p.asin FROM products p LEFT JOIN eligibility e ON e.asin = p.asin
+           WHERE p.status NOT IN ('dead','pass') AND (e.asin IS NULL OR (e.source = 'spapi' AND e.checked_at < ?))""",
+        (cutoff,))]
+
+
+def cmd_gated(a):
+    conn = _conn(a)
+    db.set_eligibility(conn, a.asin, a.status, "manual")
+    conn.commit()
+    print(f"{a.asin.upper()} → {a.status}")
+
+
+def cmd_check_gated(a):
+    from . import spapi
+    conn = _conn(a)
+    asins = _live_asins(conn) if a.all else _unchecked_gated(conn)
+    print(f"Checking {len(asins)} products against your seller account…")
+    print(spapi.check_gated(conn, asins))
+
+
+def cmd_fees(a):
+    from . import spapi
+    conn = _conn(a)
+    print(f"Updated fees for {spapi.update_fees(conn, _live_asins(conn))} products")
+
+
+def cmd_setup(a):
+    import os
+    import shutil
+    from . import spapi
+    conn = _conn(a)
+    n = lambda q: conn.execute(q).fetchone()[0]  # noqa: E731
+    try:
+        import anthropic  # noqa: F401
+        has_sdk = True
+    except ImportError:
+        has_sdk = False
+    ok, no = "✅", "⬜"
+    items = [
+        ("Products in your database", n("SELECT COUNT(*) FROM products WHERE origin != 'demo'") > 0,
+         "Add ASINs (gs add …) or import orders (gs import-orders FILE --buyer me)"),
+        ("Your Amazon orders imported", n("SELECT COUNT(*) FROM orders WHERE source_file != 'demo'") > 0,
+         "Run tools/amazon_orders_scraper.js on amazon.com, then gs import-orders"),
+        ("Amazon Seller API (gated check + real fees) — FREE", spapi.configured(),
+         "Seller Central → Apps and Services → Develop Apps → add SPAPI_* to .env (see SETUP.md)"),
+        ("Keepa API (sales history, rank, seller tracking) — PAID", bool(os.environ.get("KEEPA_API_KEY")),
+         "Buy an API plan at keepa.com/#!api → add KEEPA_API_KEY to .env"),
+        ("Claude API (AI risk flags) — PAY AS YOU GO", bool(os.environ.get("ANTHROPIC_API_KEY")) and has_sdk,
+         "console.anthropic.com → API key → add ANTHROPIC_API_KEY to .env, then pip install anthropic"),
+        ("Discord alerts — FREE", bool(os.environ.get("DISCORD_WEBHOOK_URL")),
+         "Discord channel → Edit → Integrations → Webhooks → add DISCORD_WEBHOOK_URL to .env"),
+        ("Automatic scans scheduled", bool(shutil.which("crontab")) and "gs run" in os.popen("crontab -l 2>/dev/null").read(),
+         "crontab -e  →  0 */6 * * * cd ~/ghostsignal && .venv/bin/gs run"),
+    ]
+    print("GhostSignal setup\n")
+    for label, done, todo in items:
+        print(f"{ok if done else no} {label}")
+        if not done:
+            print(f"     → {todo}")
+    print("\nNothing above is required to start: gs serve works with manual data.")
 
 
 def cmd_top(a):
@@ -236,7 +315,24 @@ def cmd_demo(a):
     print("Demo data loaded. Try: gs top   or   gs serve")
 
 
+def load_env(path=".env"):
+    """Read KEY=value lines from .env (project folder) into the environment."""
+    import os
+    from pathlib import Path
+    for f in (Path(path), Path(__file__).resolve().parent.parent / ".env"):
+        if f.is_file():
+            for line in f.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    v = v.strip().strip('"').strip("'")
+                    if v:
+                        os.environ.setdefault(k.strip(), v)
+            break
+
+
 def main(argv=None):
+    load_env()
     p = argparse.ArgumentParser(prog="gs", description="GhostSignal — find the signal, make the move.",
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     p.add_argument("--db", default=None, help="SQLite path (default data/ghostsignal.db or $GHOSTSIGNAL_DB)")
@@ -281,6 +377,11 @@ def main(argv=None):
     s = sub.add_parser("serve"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787)
     s.set_defaults(fn=cmd_serve)
     s = sub.add_parser("demo"); s.set_defaults(fn=cmd_demo)
+    s = sub.add_parser("setup"); s.set_defaults(fn=cmd_setup)
+    s = sub.add_parser("gated"); s.add_argument("asin"); s.add_argument("status", choices=list(db.GATED_STATUSES))
+    s.set_defaults(fn=cmd_gated)
+    s = sub.add_parser("check-gated"); s.add_argument("--all", action="store_true"); s.set_defaults(fn=cmd_check_gated)
+    s = sub.add_parser("fees"); s.set_defaults(fn=cmd_fees)
 
     a = p.parse_args(argv)
     if a.cmd == "seller" and a.action == "add" and not a.seller_id:

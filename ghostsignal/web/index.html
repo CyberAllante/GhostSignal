@@ -46,7 +46,7 @@
 
   /* table */
   .table { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--card); }
-  .row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 80px 64px 80px 90px; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 80px 64px 72px 110px 90px; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; }
   .row:first-child { border-top: 0; }
   .row:hover { background: var(--hover); }
   .row.th { cursor: default; color: var(--muted); font-size: 12px; padding-top: 10px; padding-bottom: 10px; }
@@ -170,6 +170,12 @@ const pct = (x) => (typeof x === "number" ? Math.round(x * 100) + "%" : "—");
 const num = (x) => (typeof x === "number" ? (x >= 1000 ? (x / 1000).toFixed(x >= 10000 ? 0 : 1) + "k" : String(x)) : "—");
 const cls = (x) => (typeof x !== "number" ? "dim" : x > 0 ? "pos" : "neg");
 const LABEL = { BUY: "Buy", RESEARCH: "Research", PASS: "Pass" };
+const GATED = { ungated: ["Yes", "BUY"], approval: ["Needs approval", "RESEARCH"], blocked: ["No", "PASS"] };
+function canSell(p) {
+  if (GATED[p.gated]) return `<span class="${GATED[p.gated][1]}">${GATED[p.gated][0]}</span>`;
+  const risk = p.enrichment?.gating_risk;
+  return risk === "high" ? `<span class="RESEARCH">Likely gated?</span>` : `<span class="dim">Not checked</span>`;
+}
 let rows = [], verdict = "", query = "", openAsin = null, timer;
 
 function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3000); }
@@ -200,7 +206,7 @@ function render() {
   const q = query.toLowerCase();
   const list = rows.filter((r) => (!verdict || r.verdict === verdict) && (!q || `${r.asin} ${r.title} ${r.brand}`.toLowerCase().includes(q)));
   if (!rows.length) { $("#table").innerHTML = `<div class="empty">No products yet. Click <b>Add</b> to paste ASINs or upload your Amazon orders.</div>`; return; }
-  $("#table").innerHTML = `<div class="row th"><div>Product</div><div>Signal</div><div class="num">Profit</div><div class="num">ROI</div><div class="num">Sales/mo</div><div>Source</div></div>` +
+  $("#table").innerHTML = `<div class="row th"><div>Product</div><div>Signal</div><div class="num">Profit</div><div class="num">ROI</div><div class="num">Sales/mo</div><div>Can sell</div><div>Source</div></div>` +
     (list.length ? list.map((r) => `
     <div class="row" data-asin="${r.asin}">
       <div class="name"><div class="t">${esc(r.title || r.asin)}</div><div class="m">${esc(r.brand || "")}${r.brand ? " · " : ""}${r.asin}</div></div>
@@ -208,6 +214,7 @@ function render() {
       <div class="num ${cls(r.economics.profit)}">${money(r.economics.profit)}</div>
       <div class="num ${cls(r.economics.roi)}">${pct(r.economics.roi)}</div>
       <div class="num">${num(r.snapshot?.monthly_sold)}</div>
+      <div>${canSell(r)}</div>
       <div class="${r.best_source ? "" : "dim"}" style="text-transform:capitalize">${esc(r.best_source?.retailer || "—")}</div>
     </div>`).join("") : `<div class="empty">Nothing matches.</div>`);
 }
@@ -228,6 +235,16 @@ function drawer(p) {
       ${cell("Profit", money(e.profit), cls(e.profit))}${cell("ROI", pct(e.roi), cls(e.roi))}${cell("Fees", money((e.referral_fee || 0) + (e.fba_fee || 0) || null))}
       ${cell("Sales/mo", num(s.monthly_sold))}${cell("Rank", num(s.sales_rank))}${cell("Sellers", s.offer_count ?? "—")}
     </div></div>
+
+    <div class="sec"><h3>Can you sell it?</h3>
+      <div class="status">
+        ${[["ungated", "Yes, ungated"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
+          `<button class="btn ${p.gated === k ? GATED[k][1] : ""}" data-gated="${k}" ${p.gated === k ? 'style="border-color:currentColor"' : ""}>${l}</button>`).join("")}
+        <a class="btn" href="${p.links.sellercentral}" target="_blank" rel="noopener">Check in Seller Central</a>
+      </div>
+      <div class="sub" style="margin-top:6px">${p.eligibility ? `Set ${p.eligibility.source === "spapi" ? "by Amazon" : "by you"} ${ago(p.eligibility.checked_at)}${p.eligibility.reason ? " · " + esc(p.eligibility.reason) : ""}` : "Not checked yet — tap one after you check."}
+        ${p.eligibility?.approval_url ? ` · <a href="${esc(p.eligibility.approval_url)}" target="_blank" rel="noopener" style="text-decoration:underline">Request approval</a>` : ""}</div>
+    </div>
 
     <div class="sec"><h3>Why</h3><ul class="list">
       ${p.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}
@@ -251,7 +268,6 @@ function drawer(p) {
     <div class="sec"><h3>Check</h3><div class="links">
       <a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon</a>
       <a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa</a>
-      <a href="${p.links.sellercentral}" target="_blank" rel="noopener">Can I sell it?</a>
       <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold</a>
     </div></div>
 
@@ -265,6 +281,9 @@ function drawer(p) {
     d.price = Number(d.price); if (d.pack_qty) d.pack_qty = Number(d.pack_qty);
     try { drawer(await api(`/api/products/${p.asin}/source`, d)); toast("Price saved"); load(); } catch (err) { toast(err.message); }
   };
+  $("#drawer").querySelectorAll("[data-gated]").forEach((b) => (b.onclick = async () => {
+    drawer(await api(`/api/products/${p.asin}/gated`, { status: b.dataset.gated })); toast("Saved"); load();
+  }));
   $("#drawer").querySelectorAll("[data-status]").forEach((b) => (b.onclick = async () => {
     await api(`/api/products/${p.asin}/status`, { status: b.dataset.status });
     toast("Marked " + b.dataset.status); close(); load();

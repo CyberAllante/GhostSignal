@@ -26,7 +26,7 @@ def evaluate(conn, asin: str, cfg: Config | None = None):
     sources = [dict(s) for s in db.latest_sources(conn, asin)]
     orders = db.order_stats(conn, asin)
     sig = score_product(dict(product), dict(snap) if snap else None, sources, orders,
-                        _enrichment(conn, asin), cfg)
+                        _enrichment(conn, asin), cfg, db.get_eligibility(conn, asin))
     return product, snap, sources, orders, sig
 
 
@@ -95,6 +95,8 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "sources": sources,
         "orders": orders,
         "enrichment": _enrichment(conn, asin),
+        "gated": sig.gated,
+        "eligibility": db.get_eligibility(conn, asin),
         "score": sig.score,
         "verdict": sig.verdict,
         "reasons": sig.reasons,

@@ -23,6 +23,8 @@ History is never overwritten. Each check adds a new snapshot, so the system can 
 
 ## Quick start
 
+**On a Mac? Follow [SETUP.md](SETUP.md) step by step.** Run `gs setup` anytime to see what's connected.
+
 ```bash
 pip install -e .            # installs the `gs` command (no required dependencies)
 gs demo                     # loads sample products
@@ -109,7 +111,7 @@ Profit $9.72 | ROI 88%
 | Availability | 8 | known in-stock source |
 | Stability | 8 | Buy Box vs 90-day average (flags price crashes and spikes) |
 
-AI flags then subtract points (gated, hazmat, IP-complaint brands). **BUY** needs score ≥ 70, profit ≥ $3 and ROI ≥ 30%. A product with no source cost yet is **RESEARCH**, and the card shows the Max Cost you'd need to hit. Every threshold is in `Config` and can be tuned.
+**Gated status overrides everything.** A product you can't sell is always PASS, and one that needs approval tops out at RESEARCH. Gated status comes from Amazon's Seller API (`gs check-gated`, free) or from you tapping Yes / Needs approval / No in the dashboard. Until it's checked, the AI's "likely gated" guess costs points instead. Hazmat and IP-complaint flags also subtract points. **BUY** needs score ≥ 70, profit ≥ $3 and ROI ≥ 30%. A product with no source cost yet is **RESEARCH**, and the card shows the Max Cost you'd need to hit. Every threshold is in `Config` and can be tuned.
 
 The fee math is an estimate. Before buying in volume, confirm each item in Amazon's Revenue Calculator and check your eligibility (the *Eligibility* link on each card).
 

@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS tracked_sellers (
     last_pull  TEXT
 );
 
+-- Can you sell it? status: ungated | approval | blocked. source: spapi | manual
+CREATE TABLE IF NOT EXISTS eligibility (
+    asin         TEXT PRIMARY KEY REFERENCES products(asin),
+    status       TEXT NOT NULL,
+    reason       TEXT DEFAULT '',
+    approval_url TEXT DEFAULT '',
+    source       TEXT NOT NULL,
+    checked_at   TEXT NOT NULL
+);
+
 -- AI enrichment (risk flags, replenishable, etc.)
 CREATE TABLE IF NOT EXISTS enrichment (
     asin        TEXT PRIMARY KEY REFERENCES products(asin),
@@ -228,3 +238,23 @@ def last_signal(conn: sqlite3.Connection, asin: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM signals WHERE asin = ? ORDER BY created_at DESC, id DESC LIMIT 1", (asin,)
     ).fetchone()
+
+
+GATED_STATUSES = ("ungated", "approval", "blocked")
+
+
+def set_eligibility(conn: sqlite3.Connection, asin: str, status: str, source: str = "manual",
+                    reason: str = "", approval_url: str = "") -> None:
+    if status not in GATED_STATUSES:
+        raise ValueError(f"status must be one of {GATED_STATUSES}")
+    upsert_product(conn, asin)
+    conn.execute(
+        """INSERT OR REPLACE INTO eligibility (asin, status, reason, approval_url, source, checked_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (asin.upper(), status, reason, approval_url, source, now()),
+    )
+
+
+def get_eligibility(conn: sqlite3.Connection, asin: str) -> dict | None:
+    row = conn.execute("SELECT * FROM eligibility WHERE asin = ?", (asin,)).fetchone()
+    return dict(row) if row else None

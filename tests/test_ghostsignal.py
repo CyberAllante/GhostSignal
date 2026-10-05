@@ -104,3 +104,29 @@ def test_keepa_parse():
     assert prod["image_url"].endswith("abc.jpg") and prod["category"].startswith("Grocery")
     assert snap == {"buy_box": 23.99, "amazon_price": 23.99, "avg_price_90": 16.13, "sales_rank": 2567,
                     "monthly_sold": 2000, "offer_count": 18, "referral_pct": 0.15, "fba_fee": 4.10}
+
+
+def test_gating_overrides_verdict(conn):
+    from ghostsignal import spapi
+    snap = {"buy_box": 30.0, "avg_price_90": 29.0, "monthly_sold": 500, "offer_count": 5, "fba_fee": 4.0}
+    src = [{"retailer": "costco", "price": 10.0, "pack_qty": 1, "in_stock": 1}]
+    orders = {"orders": 3, "buyers": 3, "repeat_buyers": 1}
+    assert score_product({}, snap, src, orders, eligibility={"status": "ungated"}).verdict == "BUY"
+    assert score_product({}, snap, src, orders, eligibility={"status": "approval"}).verdict == "RESEARCH"
+    assert score_product({}, snap, src, orders, eligibility={"status": "blocked"}).verdict == "PASS"
+    # confirmed ungated ignores the AI's "likely gated" guess
+    s = score_product({}, snap, src, orders, {"gating_risk": "high"}, eligibility={"status": "ungated"})
+    assert s.verdict == "BUY" and s.gated == "ungated"
+
+    assert spapi.parse_restrictions({"restrictions": []})[0] == "ungated"
+    st, _, url = spapi.parse_restrictions({"restrictions": [{"reasons": [
+        {"reasonCode": "APPROVAL_REQUIRED", "message": "Need approval",
+         "links": [{"resource": "https://sellercentral.amazon.com/hz/approvalrequest?asin=X"}]}]}]})
+    assert st == "approval" and url.startswith("https://sellercentral")
+    assert spapi.parse_restrictions({"restrictions": [{"reasons": [{"reasonCode": "NOT_ELIGIBLE"}]}]})[0] == "blocked"
+    assert spapi.parse_fees({"payload": {"FeesEstimateResult": {"FeesEstimate": {"FeeDetailList": [
+        {"FeeType": "ReferralFee", "FinalFee": {"Amount": 4.63}},
+        {"FeeType": "FBAFees", "FinalFee": {"Amount": 4.95}}]}}}}) == (4.63, 4.95)
+
+    db.set_eligibility(conn, "B00F0FC3OC", "blocked")
+    assert engine.product_view(conn, "B00F0FC3OC")["gated"] == "blocked"
