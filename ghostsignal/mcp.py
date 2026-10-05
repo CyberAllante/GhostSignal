@@ -347,6 +347,33 @@ def t_outcomes(conn, a):
     return f"Total profit {_money(o['total_profit'])} over {o['sold_lots']} lots.\n" + "\n".join(lines)
 
 
+def t_ungate_targets(conn, a):
+    from . import ungate
+    t = ungate.targets(conn)
+    n = int(a.get("limit") or 8)
+    def block(title, groups):
+        rows = [f"- {g['name']}: {g['products']} products ({g['strong']} strong), best rank {g['best_rank'] or '-'}, median ${g['median_price'] or '-'}"
+                + (f" | e.g. {'; '.join(g['examples'][:2])}" if g["examples"] else "") + (f" | apply: {g['approval_url']}" if g["approval_url"] else "")
+                for g in groups[:n]]
+        return f"{title}\n" + ("\n".join(rows) or "- none")
+    return (block("CATEGORY approvals (one approval opens every product in it):", t["categories"]) + "\n\n"
+            + block("BRAND approvals:", t["brands"])
+            + f"\n\n{t['closed_to_applications']} products are in brands Amazon is not accepting applications for. 'Strong' = rank under 50,000 and price $10+.")
+
+
+def t_recheck_gated(conn, a):
+    """After the user gets approved for something, drop old gating answers so the next run re-checks them."""
+    where, args = ["e.source = 'spapi'"], []
+    if a.get("brand"):
+        where.append("lower(p.brand) = lower(?)"); args.append(a["brand"])
+    if a.get("category"):
+        where.append("(lower(p.category) = lower(?) OR lower(e.reason) LIKE ?)"); args += [a["category"], f"%{a['category'].lower()}%"]
+    rows = conn.execute(f"SELECT e.asin FROM eligibility e JOIN products p ON p.asin = e.asin WHERE {' AND '.join(where)} AND e.status != 'ungated'", args).fetchall()
+    conn.executemany("DELETE FROM eligibility WHERE asin = ?", [(r[0],) for r in rows])
+    conn.commit()
+    return f"Cleared {len(rows)} old gating answers. Run `run_now` and they will be re-checked against your account."
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -387,6 +414,8 @@ TOOLS = {
     "blocked_brands": _tool(t_blocked_brands, "View or edit the user's never-show brand list.",
                             {"add": {"type": "array", "items": S}, "remove": {"type": "array", "items": S}}),
     "outcomes": _tool(t_outcomes, "Predicted vs actual: how each verdict at purchase time performed once sold."),
+    "ungate_targets": _tool(t_ungate_targets, "Which category/brand approvals would unlock the most strong products. Use when the user wants to decide what to get ungated.", {"limit": I}),
+    "recheck_gated": _tool(t_recheck_gated, "After the user is approved for a brand/category, clear stale gating so it is re-checked (then call run_now).", {"brand": S, "category": S}),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

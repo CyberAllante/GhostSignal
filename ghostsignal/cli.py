@@ -173,7 +173,7 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
     from . import spapi, stores
     if spapi.configured():
         if not os.environ.get("KEEPA_API_KEY"):   # no Keepa: the free Seller API supplies price/rank/offers
-            stale = _stale_asins(conn, stale_days)
+            stale = _stale_asins(conn, stale_days, limit=2000)   # the Seller API costs no tokens, so no small cap
             if stale:
                 print("seller api market data:", spapi.refresh_market(conn, stale), flush=True)
         unchecked = _unchecked_gated(conn)

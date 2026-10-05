@@ -305,7 +305,7 @@ def test_spapi_market_refresh(conn, monkeypatch):
     db.add_snapshot(conn, "B00NLVM6WK", "keepa", buy_box=20.0, monthly_sold=400, avg_price_90=23.0)
     assert spapi.refresh_market(conn, ["B00NLVM6WK", "GS00000001"]) == {"updated": 1, "not_found": 0}
     p = dict(conn.execute("SELECT * FROM products WHERE asin='B00NLVM6WK'").fetchone())
-    assert p["brand"] == "Wild Planet" and p["image_url"] == "https://img/main.jpg" and p["category"] == "Canned Tuna"
+    assert p["brand"] == "Wild Planet" and p["image_url"] == "https://img/main.jpg" and p["category"] == "Grocery & Gourmet Food"
     s = dict(db.latest_snapshot(conn, "B00NLVM6WK"))
     assert s["buy_box"] == 24.5 and s["sales_rank"] == 842 and s["offer_count"] == 7
     assert s["fba_offers"] == 3 and s["fbm_offers"] == 4 and s["amazon_price"] == 25.99
@@ -366,3 +366,12 @@ def test_mcp_cleanup_and_outcomes(tmp_path):
     assert "Restored 2" in mcp.t_restore(c, {})
     assert "Zorbo" in mcp.t_blocked_brands(c, {"add": ["Zorbo"]})
     assert "Nothing sold" in mcp.t_outcomes(c, {})
+
+
+def test_subcategory_rank_not_used_as_overall_rank():
+    from ghostsignal import spapi
+    item = {"asin": "B01N0W1YIK", "summaries": [{"marketplaceId": "ATVPDKIKX0DER", "brand": "MOSISO", "itemName": "Sleeve"}],
+            "salesRanks": [{"marketplaceId": "ATVPDKIKX0DER", "displayGroupRanks": [],
+                            "classificationRanks": [{"title": "Laptop Sleeves", "rank": 1}]}]}
+    product, rank, extra = spapi.parse_catalog_item(item)
+    assert rank is None and extra == {"sub_rank": 1, "sub_category": "Laptop Sleeves"} and product["category"] == "Laptop Sleeves"

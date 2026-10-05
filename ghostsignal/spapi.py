@@ -164,23 +164,20 @@ def _landed(price: dict | None) -> float | None:
     return _amt((price or {}).get("LandedPrice")) or _amt((price or {}).get("ListingPrice"))
 
 
-def parse_catalog_item(item: dict) -> tuple[dict, int | None]:
-    """-> (product fields, sales rank) from one Catalog Items 2022-04-01 item."""
-    summ = next((x for x in item.get("summaries") or [] if x.get("marketplaceId") == MARKETPLACE_US),
-                (item.get("summaries") or [{}])[0] if item.get("summaries") else {})
-    cat = (summ.get("browseClassification") or {}).get("displayName") or ""
-    ranks = next((x for x in item.get("salesRanks") or [] if x.get("marketplaceId") == MARKETPLACE_US),
-                 (item.get("salesRanks") or [{}])[0] if item.get("salesRanks") else {})
+def parse_catalog_item(item: dict) -> tuple[dict, int | None, dict]:
+    """-> (product fields, overall sales rank, extra). The overall rank comes only from the top-level display
+    group (e.g. #15,929 in Home & Kitchen). Sub-category ranks (#1 in Laptop Sleeves) are not comparable, so
+    they go in `extra` and never feed the demand score."""
+    pick = lambda arr: next((x for x in arr or [] if x.get("marketplaceId") == MARKETPLACE_US), (arr or [{}])[0] if arr else {})
+    summ, ranks, imgs = pick(item.get("summaries")), pick(item.get("salesRanks")), pick(item.get("images"))
     group, classes = ranks.get("displayGroupRanks") or [], ranks.get("classificationRanks") or []
-    rank = (group[0] if group else classes[0] if classes else {}).get("rank")
-    if not cat and group:
-        cat = group[0].get("title") or ""
-    imgs = next((x for x in item.get("images") or [] if x.get("marketplaceId") == MARKETPLACE_US),
-                (item.get("images") or [{}])[0] if item.get("images") else {})
+    rank = group[0].get("rank") if group else None
+    sub = classes[0] if classes else {}
+    main_cat = (group[0].get("title") if group else "") or (sub.get("title") or "") or (summ.get("browseClassification") or {}).get("displayName") or ""
     main = next((i for i in imgs.get("images") or [] if i.get("variant") == "MAIN"), None)
     product = {"title": summ.get("itemName"), "brand": summ.get("brand") or summ.get("manufacturer"),
-               "category": cat, "image_url": (main or {}).get("link")}
-    return product, rank
+               "category": main_cat, "image_url": (main or {}).get("link")}
+    return product, rank, {"sub_rank": sub.get("rank"), "sub_category": sub.get("title")}
 
 
 def parse_offers(payload: dict) -> dict:
@@ -241,14 +238,16 @@ def refresh_market(conn, asins: list[str]) -> dict:
             if asin not in items and asin not in offers:
                 skipped += 1
                 continue
-            product, rank = parse_catalog_item(items.get(asin, {}))
+            product, rank, extra = parse_catalog_item(items.get(asin, {}))
             snap = parse_offers(offers.get(asin, {})) if asin in offers else {}
             prev = db.latest_snapshot(conn, asin)
             carry = {k: prev[k] for k in _CARRY if prev and prev[k] is not None}
             if snap.get("buy_box") is None and prev:      # no Buy Box now: keep the last known price
                 snap["buy_box"] = prev["buy_box"]
             db.upsert_product(conn, asin, last_checked=db.now(), **product)
-            db.add_snapshot(conn, asin, "spapi", sales_rank=rank, **{**carry, **snap})
+            if product.get("category"):    # keep the broad category (filters group by it), replacing older sub-category values
+                conn.execute("UPDATE products SET category = ? WHERE asin = ?", (product["category"], asin))
+            db.add_snapshot(conn, asin, "spapi", sales_rank=rank, raw_json=json.dumps(extra), **{**carry, **snap})
             done += 1
         conn.commit()
         if i + 20 < len(asins):

@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, engine, importers, mcp, restrictions
+from . import db, engine, importers, mcp, restrictions, ungate
 
 WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
@@ -39,7 +39,7 @@ def sellers(conn):
 _run_lock = threading.Lock()
 
 
-def refresh_in_background(db_path):
+def refresh_in_background(db_path, stale_days=None):
     """After new data lands, pull Keepa/store prices/etc. for whatever keys are connected."""
     def work():
         if not _run_lock.acquire(blocking=False):
@@ -47,7 +47,7 @@ def refresh_in_background(db_path):
         try:
             from .cli import run_pipeline
             c = db.connect(db_path)
-            run_pipeline(c)
+            run_pipeline(c, stale_days)
             c.close()
         except Exception as e:
             print("background refresh failed:", e, flush=True)
@@ -209,6 +209,8 @@ def make_handler(db_path):
                     return self._send(200, {"running": is_running(), "last_run": db.get_setting(conn, "last_run")})
                 if url.path == "/api/blocked-brands":
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
+                if url.path == "/api/ungate":
+                    return self._send(200, ungate.targets(conn))
                 if url.path == "/api/outcomes":
                     return self._send(200, db.outcomes(conn))
                 if url.path == "/api/products":
@@ -464,7 +466,7 @@ def make_handler(db_path):
                 if url.path == "/api/refresh":      # pull fresh data from every connected source, in the background
                     if is_running():
                         return self._send(200, {"started": False, "running": True})
-                    refresh_in_background(db_path)
+                    refresh_in_background(db_path, 0 if body.get("force") else None)   # force = re-pull everything now
                     return self._send(200, {"started": True, "running": True})
                 if url.path == "/api/score":
                     changes = engine.run(conn)
