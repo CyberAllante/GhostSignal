@@ -8,6 +8,8 @@ GhostSignal is a retail arbitrage intelligence system. Instead of hunting for on
 DATA  →  DETECT  →  VERIFY  →  SCORE  →  ALERT
 ```
 
+**Hosting on Railway (not your Mac):** see [RAILWAY.md](RAILWAY.md).
+
 ## One master database, three ways to sell
 
 Every product lives in one list, whether you found it on Amazon, at a thrift store or on Facebook. Each product gets a profit on **Amazon**, **eBay** and **Facebook Marketplace**, and the score uses the best one. Things you buy go into **Inventory**, where you can list them on any channel and move them between channels. If you can't sell something on Amazon but it sells on eBay, it isn't marked Pass.

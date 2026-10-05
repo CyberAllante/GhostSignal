@@ -169,3 +169,37 @@ def test_store_matching():
         {"title": "Totally different thing", "source": "Target", "extracted_price": 3.0},
     ], "Peet's Coffee Major Dickason's Blend Dark Roast Ground Coffee, 32 oz")
     assert [o["retailer"] for o in offers] == ["samsclub", "costco"]
+
+
+def test_clear_demo_only_removes_samples(conn):
+    from ghostsignal.demo import seed, clear_demo, has_demo
+    seed(conn)
+    db.upsert_product(conn, "B0REALITEM1", title="Mine", origin="orders")
+    db.add_inventory(conn, "B0REALITEM1", 1, 5.0)
+    assert has_demo(conn)
+    assert clear_demo(conn) == 5
+    assert not has_demo(conn)
+    assert conn.execute("SELECT asin FROM products").fetchall()[0][0] == "B0REALITEM1"
+    assert conn.execute("SELECT COUNT(*) FROM inventory").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+
+
+def test_server_requires_password(tmp_path, monkeypatch):
+    import base64, threading, urllib.error, urllib.request
+    from http.server import ThreadingHTTPServer
+    from ghostsignal import server
+    monkeypatch.setenv("GHOSTSIGNAL_PASSWORD", "pw")
+    dbp = tmp_path / "t.db"
+    db.connect(dbp).close()
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(str(dbp)))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        urllib.request.urlopen(base + "/api/stats")
+        assert False, "should be 401"
+    except urllib.error.HTTPError as e:
+        assert e.code == 401
+    assert urllib.request.urlopen(base + "/health").status == 200
+    req = urllib.request.Request(base + "/api/stats", headers={"Authorization": "Basic " + base64.b64encode(b"u:pw").decode()})
+    assert urllib.request.urlopen(req).status == 200
+    httpd.shutdown()

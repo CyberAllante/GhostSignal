@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
+import os
 import re
 import tempfile
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -47,8 +52,49 @@ def sellers(conn):
     return out
 
 
+_run_lock = threading.Lock()
+
+
+def refresh_in_background(db_path):
+    """After new data lands, pull Keepa/store prices/etc. for whatever keys are connected."""
+    def work():
+        if not _run_lock.acquire(blocking=False):
+            return
+        try:
+            from .cli import run_pipeline
+            c = db.connect(db_path)
+            run_pipeline(c)
+            c.close()
+        except Exception as e:
+            print("background refresh failed:", e, flush=True)
+        finally:
+            _run_lock.release()
+    threading.Thread(target=work, daemon=True).start()
+
+
 def make_handler(db_path):
+    password = os.environ.get("GHOSTSIGNAL_PASSWORD", "")
+    root = Path(__file__).resolve().parent.parent
+
     class Handler(BaseHTTPRequestHandler):
+        def _authed(self) -> bool:
+            """HTTP Basic auth. Any username, password = GHOSTSIGNAL_PASSWORD. /health is open."""
+            if not password or self.path == "/health":
+                return True
+            header = self.headers.get("Authorization", "")
+            if header.startswith("Basic "):
+                try:
+                    given = base64.b64decode(header[6:]).decode().partition(":")[2]
+                    if hmac.compare_digest(given.encode(), password.encode()):
+                        return True
+                except Exception:
+                    pass
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="GhostSignal"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         def log_message(self, fmt, *args):  # quieter
             pass
 
@@ -66,7 +112,14 @@ def make_handler(db_path):
             return json.loads(self.rfile.read(n) or b"{}")
 
         def do_GET(self):
+            if not self._authed():
+                return None
             url = urlparse(self.path)
+            if url.path == "/health":
+                return self._send(200, {"ok": True})
+            if url.path == "/tools/amazon_orders_scraper.js":
+                return self._send(200, (root / "tools" / "amazon_orders_scraper.js").read_bytes(),
+                                  "text/javascript; charset=utf-8")
             qs = {k: v[0] for k, v in parse_qs(url.query).items()}
             conn = db.connect(db_path)
             try:
@@ -97,6 +150,9 @@ def make_handler(db_path):
                         "inventory_cost": c("SELECT COALESCE(SUM((qty - sold_qty) * unit_cost), 0) FROM inventory WHERE status != 'sold'"),
                         "realized_profit": c("SELECT COALESCE(SUM((sold_price - COALESCE(unit_cost, 0)) * sold_qty), 0) FROM inventory WHERE status = 'sold'"),
                     })
+                if url.path == "/api/demo":
+                    from .demo import has_demo
+                    return self._send(200, {"has_demo": has_demo(conn)})
                 if url.path == "/api/setup":
                     from .setup_status import checklist
                     return self._send(200, {"items": checklist(conn), "location": db.get_setting(conn, "location")})
@@ -138,6 +194,8 @@ def make_handler(db_path):
                 conn.close()
 
         def do_POST(self):
+            if not self._authed():
+                return None
             url = urlparse(self.path)
             conn = db.connect(db_path)
             try:
@@ -236,17 +294,24 @@ def make_handler(db_path):
                 if url.path == "/api/add":
                     return self._send(200, {"added": importers.import_asin_text(conn, body.get("text", ""))})
                 if url.path in ("/api/import/orders", "/api/import/products"):
+                    if url.path.endswith("orders") and not (body.get("buyer") or "").strip():
+                        mm = re.match(r"amazon-orders-(.+?)(?:\s\(\d+\))?\.(?:json|csv)$", body.get("filename") or "", re.I)
+                        body["buyer"] = mm.group(1) if mm else "me"
                     suffix = Path(body.get("filename") or "upload.csv").suffix or ".csv"
                     with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False, encoding="utf-8") as f:
                         f.write(body["content"])
                     try:
                         if url.path.endswith("orders"):
-                            r = importers.import_orders(conn, f.name, body.get("buyer") or "me")
+                            r = importers.import_orders(conn, f.name, body["buyer"].strip())
+                            refresh_in_background(db_path)
                         else:
                             r = importers.import_products(conn, f.name, body.get("source") or "upload")
                     finally:
                         Path(f.name).unlink(missing_ok=True)
                     return self._send(200, r)
+                if url.path == "/api/demo/clear":
+                    from .demo import clear_demo
+                    return self._send(200, {"removed": clear_demo(conn)})
                 if url.path == "/api/score":
                     changes = engine.run(conn)
                     return self._send(200, {"changes": [
@@ -261,10 +326,33 @@ def make_handler(db_path):
     return Handler
 
 
-def serve(db_path=None, host="127.0.0.1", port=8787):
+def _scheduler(db_path, hours: float):
+    """Refresh + score + alert on a timer, inside the same service (no separate cron needed)."""
+    from .cli import run_pipeline
+    while True:
+        time.sleep(hours * 3600)
+        try:
+            conn = db.connect(db_path)
+            run_pipeline(conn)
+            conn.close()
+        except Exception as e:  # keep the loop alive
+            print("scheduled run failed:", e, flush=True)
+
+
+def serve(db_path=None, host=None, port=None):
+    on_railway = bool(os.environ.get("PORT"))
+    host = host or ("0.0.0.0" if on_railway else "127.0.0.1")
+    port = int(port or os.environ.get("PORT") or 8787)
+    if host != "127.0.0.1" and not os.environ.get("GHOSTSIGNAL_PASSWORD"):
+        raise SystemExit("Refusing to start on a public address without a password.\n"
+                         "Set GHOSTSIGNAL_PASSWORD (it protects your order data), then start again.")
     db.connect(db_path).close()
+    hours = float(os.environ.get("GHOSTSIGNAL_AUTO_RUN_HOURS") or 0)
+    if hours:
+        threading.Thread(target=_scheduler, args=(db_path, hours), daemon=True).start()
+        print(f"Auto-run every {hours:g}h", flush=True)
     httpd = ThreadingHTTPServer((host, port), make_handler(db_path))
-    print(f"GhostSignal dashboard → http://{host}:{port}")
+    print(f"GhostSignal dashboard on {host}:{port}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -264,6 +264,18 @@
   <div class="foot"><button class="btn" onclick="this.closest('dialog').close()">Cancel</button><button class="btn primary" id="addGo">Add</button></div>
 </div></dialog>
 
+<dialog id="dlgOrders"><div class="dlg">
+  <h2>Import Amazon orders</h2>
+  <p>Do this once per person. You can pick several files at once.</p>
+  <div class="field"><label>1. On their computer, get the order file</label>
+    <div class="hint" style="margin:0 0 8px">Log in to amazon.com, open <b>amazon.com/your-orders/orders</b>, open the browser Console (Mac: Cmd+Option+J), paste the script, press Enter. It downloads a file named <b>amazon-orders-NAME.json</b>.</div>
+    <button class="btn sm" id="copyScript">Copy the exporter script</button></div>
+  <div class="field"><label>2. Pick the file(s)</label><input type="file" id="ordFile" accept=".csv,.json" multiple>
+    <div class="hint">Also works with Amazon's official <b>Request Your Data</b> file (Retail.OrderHistory.csv).</div></div>
+  <div class="field"><label>Whose orders? <span style="font-weight:400;color:var(--muted)">(optional, taken from the file name)</span></label><input id="ordBuyer" placeholder="me, gf, mom"></div>
+  <div class="foot"><button class="btn" onclick="this.closest('dialog').close()">Cancel</button><button class="btn primary" id="ordGo">Import</button></div>
+</div></dialog>
+
 <dialog id="dlgSeller"><div class="dlg">
   <h2>Track a seller</h2>
   <p>Paste their Amazon storefront link (it has <b>seller=A…</b> or <b>me=A…</b> in it) or their seller ID.</p>
@@ -318,13 +330,22 @@ const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><di
 
 async function pageDashboard() {
   const seq = routeSeq;
-  const [, stats, changes, setup] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup")]);
+  const [, stats, changes, setup, demo] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup"), api("/api/demo")]);
+  const ordersDone = setup.items.find((i) => i.key === "orders")?.done;
   const buys = products.filter((p) => p.verdict === "BUY").length, res = products.filter((p) => p.verdict === "RESEARCH").length;
   const top = products.filter((p) => p.verdict !== "PASS").slice(0, 8);
   const done = setup.items.filter((i) => i.done).length;
   if (!paint(seq, `
+    ${demo.has_demo ? `<div class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:#fcd34d;background:#fffbeb">
+      <div><b>You're looking at sample data.</b> <span style="color:var(--muted)">None of this is real. Clear it, then import your own.</span></div>
+      <button class="btn" onclick="clearDemo()">Clear sample data</button></div>` : ""}
+    ${!ordersDone ? `<div class="card" style="padding:20px;margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center">
+        <div><div style="font-weight:600;font-size:16px">Start here: import Amazon order history</div>
+        <div style="color:var(--muted);margin-top:2px">Everything gets built from the orders you give it: products, who bought what, how often. Then the store prices, fees and scores fill in.</div></div>
+        <button class="btn primary" onclick="$('#dlgOrders').showModal()">${icon("plus")}Import orders</button></div></div>` : ""}
     <div class="page-head"><div><h1>Dashboard</h1><p>Last scan ${ago(stats.last_run)}</p></div>
-      <div class="actions"><button class="btn" onclick="openAdd()">${icon("plus")}Add products</button><button class="btn primary" onclick="scan()">${icon("scan")}Run scan</button></div></div>
+      <div class="actions"><button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button><button class="btn" onclick="openAdd()">${icon("plus")}Add products</button><button class="btn primary" onclick="scan()">${icon("scan")}Run scan</button></div></div>
     <div class="stats">
       ${statCard("green", "cart", buys, "Buy now", "#/products?v=BUY")}
       ${statCard("orange", "eye", res, "To research", "#/products?v=RESEARCH")}
@@ -368,6 +389,7 @@ async function pageProducts(params) {
   if (!paint(seq, `
     <div class="page-head"><div><h1>Products</h1><p>Every product you're watching. Click a row for details.</p></div>
       <div class="actions">
+        <button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button>
         <button class="btn" onclick="copyAsins()">${icon("copy")}Copy ASINs</button>
         <a class="btn" href="/api/export.csv">${icon("dl")}Export</a>
         <button class="btn primary" onclick="openAdd()">${icon("plus")}Add products</button></div></div>
@@ -615,6 +637,28 @@ async function openDrawer(asin) { drawer(await api(`/api/products/${asin}`)); $(
 function closeDrawer() { $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
 
 /* ---------- actions ---------- */
+async function clearDemo() {
+  if (!confirm("Remove the sample products? Anything you imported stays.")) return;
+  const r = await api("/api/demo/clear", {}); toast(`Removed ${r.removed} sample products`); route();
+}
+$("#copyScript").onclick = async () => {
+  const t = await (await fetch("/tools/amazon_orders_scraper.js")).text();
+  await navigator.clipboard.writeText(t); toast("Script copied. Paste it into the amazon.com Console.");
+};
+$("#ordGo").onclick = async () => {
+  const files = [...$("#ordFile").files];
+  if (!files.length) return toast("Pick a file first");
+  const b = $("#ordGo"); b.disabled = true; b.textContent = "Importing…";
+  let lines = 0, errs = [];
+  for (const f of files) {
+    try { lines += (await api("/api/import/orders", { filename: f.name, content: await f.text(), buyer: $("#ordBuyer").value })).added; }
+    catch (e) { errs.push(`${f.name}: ${e.message}`); }
+  }
+  b.disabled = false; b.textContent = "Import";
+  $("#dlgOrders").close(); $("#ordFile").value = ""; $("#ordBuyer").value = "";
+  await api("/api/score", {});
+  toast(errs.length ? errs.join(" · ") : lines ? `${lines} order lines imported. Looking up prices in the background.` : "No new orders. That file was already imported."); route();
+};
 function openAdd() { $("#dlgAdd").showModal(); }
 async function copyAsins() {
   const t = await api("/api/asins");

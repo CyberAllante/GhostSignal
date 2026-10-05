@@ -151,31 +151,35 @@ def cmd_score(a):
             print(engine.format_alert(c), end="\n\n")
 
 
-def cmd_run(a):
+def run_pipeline(conn, stale_days: float = 3, max_prices: int = 50):
+    """Everything `gs run` does. Each step only runs if its key is connected."""
     import os
-    conn = _conn(a)
     if os.environ.get("KEEPA_API_KEY"):
         from . import keepa
         for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers WHERE status = 'active'").fetchall():
             keepa.seller_storefront(conn, sid)
-        stale = _stale_asins(conn, a.stale_days)
+        stale = _stale_asins(conn, stale_days)
         if stale:
-            print("keepa:", keepa.refresh(conn, stale))
-    from . import spapi
+            print("keepa:", keepa.refresh(conn, stale), flush=True)
+    from . import spapi, stores
     if spapi.configured():
         unchecked = _unchecked_gated(conn)
         if unchecked:
-            print("gated check:", spapi.check_gated(conn, unchecked))
-        print("fees updated:", spapi.update_fees(conn, _live_asins(conn)))
-    from . import stores
+            print("gated check:", spapi.check_gated(conn, unchecked), flush=True)
+        print("fees updated:", spapi.update_fees(conn, _live_asins(conn)), flush=True)
     if stores.configured():
-        print("store prices:", stores.find_prices(conn, stores.due_for_check(conn, a.max_prices)))
+        print("store prices:", stores.find_prices(conn, stores.due_for_check(conn, max_prices)), flush=True)
     if os.environ.get("ANTHROPIC_API_KEY"):
         from . import enrich
-        print("enriched:", enrich.enrich(conn))
+        print("enriched:", enrich.enrich(conn), flush=True)
     changes = engine.run(conn)
-    print(f"{len(changes)} alert(s)")
+    print(f"{len(changes)} alert(s)", flush=True)
     engine.send_alerts(changes)
+    return changes
+
+
+def cmd_run(a):
+    run_pipeline(_conn(a), a.stale_days, a.max_prices)
 
 
 def _live_asins(conn):
@@ -311,6 +315,11 @@ def cmd_serve(a):
     serve(a.db, a.host, a.port)
 
 
+def cmd_clear_demo(a):
+    from .demo import clear_demo
+    print(f"Removed {clear_demo(_conn(a))} sample products. Your own data is untouched.")
+
+
 def cmd_demo(a):
     from .demo import seed
     conn = _conn(a)
@@ -384,9 +393,10 @@ def main(argv=None):
     s.add_argument("status", choices=["watch", "buy", "research", "pass", "dead"]); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("export"); s.add_argument("what", choices=["asins", "csv"]); s.add_argument("--verdict")
     s.add_argument("-o", "--output"); s.set_defaults(fn=cmd_export)
-    s = sub.add_parser("serve"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787)
+    s = sub.add_parser("serve"); s.add_argument("--host", default=None); s.add_argument("--port", type=int, default=None)
     s.set_defaults(fn=cmd_serve)
     s = sub.add_parser("demo"); s.set_defaults(fn=cmd_demo)
+    s = sub.add_parser("clear-demo"); s.set_defaults(fn=cmd_clear_demo)
     s = sub.add_parser("setup"); s.set_defaults(fn=cmd_setup)
     s = sub.add_parser("gated"); s.add_argument("asin"); s.add_argument("status", choices=list(db.GATED_STATUSES))
     s.set_defaults(fn=cmd_gated)
