@@ -86,4 +86,9 @@ Put all four in `.env`, then run:
 ```bash
 ./gs check-gated   # ungated / needs approval / can't sell, for YOUR account
 ./gs fees          # Amazon's real fees
+./gs market        # price, Buy Box, offers, sales rank, title/brand/image for stale products (free Keepa stand-in)
+./gs market --all  # everything, right now
 ```
+
+With no Keepa key set, `gs run` and the daily auto-run use the Seller API for market data automatically. It does not give price history or sales per month; those need Keepa.
+On Railway, add the four `SPAPI_*` values as service variables.

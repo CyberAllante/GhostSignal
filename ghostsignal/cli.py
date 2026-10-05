@@ -172,6 +172,10 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
             print("keepa:", keepa.refresh(conn, stale), flush=True)
     from . import spapi, stores
     if spapi.configured():
+        if not os.environ.get("KEEPA_API_KEY"):   # no Keepa: the free Seller API supplies price/rank/offers
+            stale = _stale_asins(conn, stale_days)
+            if stale:
+                print("seller api market data:", spapi.refresh_market(conn, stale), flush=True)
         unchecked = _unchecked_gated(conn)
         if unchecked:
             print("gated check:", spapi.check_gated(conn, unchecked), flush=True)
@@ -216,6 +220,14 @@ def cmd_check_gated(a):
     asins = _live_asins(conn) if a.all else _unchecked_gated(conn)
     print(f"Checking {len(asins)} products against your seller account…")
     print(spapi.check_gated(conn, asins))
+
+
+def cmd_market(a):
+    from . import spapi
+    conn = _conn(a)
+    asins = _live_asins(conn) if a.all else _stale_asins(conn, a.stale_days)
+    print(f"Pulling market data for {len(asins)} products from the Seller API…")
+    print(spapi.refresh_market(conn, asins))
 
 
 def cmd_fees(a):
@@ -410,6 +422,7 @@ def main(argv=None):
     s = sub.add_parser("gated"); s.add_argument("asin"); s.add_argument("status", choices=list(db.GATED_STATUSES))
     s.set_defaults(fn=cmd_gated)
     s = sub.add_parser("check-gated"); s.add_argument("--all", action="store_true"); s.set_defaults(fn=cmd_check_gated)
+    s = sub.add_parser("market"); s.add_argument("--all", action="store_true"); s.add_argument("--stale-days", type=float, default=None); s.set_defaults(fn=cmd_market)
     s = sub.add_parser("fees"); s.set_defaults(fn=cmd_fees)
 
     a = p.parse_args(argv)

@@ -277,3 +277,36 @@ def test_outcomes_compare_prediction_to_result(conn):
     db.update_inventory(conn, i, status="sold", sold_price=12.0)
     o = db.outcomes(conn)
     assert o["by_verdict"]["BUY"]["wins"] == 1 and o["by_verdict"]["BUY"]["profit"] == 14.0 and o["total_profit"] == 14.0
+
+
+CATALOG = {"items": [{"asin": "B00NLVM6WK",
+    "summaries": [{"marketplaceId": "ATVPDKIKX0DER", "brand": "Wild Planet", "itemName": "Wild Planet Albacore Tuna 5oz",
+                   "browseClassification": {"displayName": "Canned Tuna"}}],
+    "salesRanks": [{"marketplaceId": "ATVPDKIKX0DER",
+                    "displayGroupRanks": [{"title": "Grocery & Gourmet Food", "rank": 842}],
+                    "classificationRanks": [{"title": "Canned Tuna", "rank": 12}]}],
+    "images": [{"marketplaceId": "ATVPDKIKX0DER", "images": [{"variant": "PT01", "link": "x"}, {"variant": "MAIN", "link": "https://img/main.jpg"}]}]}]}
+OFFERS = {"responses": [{"status": {"statusCode": 200}, "body": {"payload": {"ASIN": "B00NLVM6WK", "status": "Success",
+    "Summary": {"TotalOfferCount": 9,
+                "NumberOfOffers": [{"condition": "new", "fulfillmentChannel": "Amazon", "OfferCount": 3},
+                                   {"condition": "new", "fulfillmentChannel": "Merchant", "OfferCount": 4},
+                                   {"condition": "used", "fulfillmentChannel": "Merchant", "OfferCount": 2}],
+                "BuyBoxPrices": [{"condition": "New", "LandedPrice": {"Amount": 24.5}, "ListingPrice": {"Amount": 24.5}}]},
+    "Offers": [{"SellerId": "ATVPDKIKX0DER", "ListingPrice": {"Amount": 25.99}, "Shipping": {"Amount": 0}, "IsBuyBoxWinner": False},
+               {"SellerId": "A1XYZ", "ListingPrice": {"Amount": 24.5}, "IsBuyBoxWinner": True}]}}},
+    {"status": {"statusCode": 404}, "body": {"errors": []}}]}
+
+
+def test_spapi_market_refresh(conn, monkeypatch):
+    from ghostsignal import spapi
+    monkeypatch.setattr(spapi.time, "sleep", lambda s: None)
+    monkeypatch.setattr(spapi, "_call", lambda method, path, params=None, body=None: CATALOG if "catalog" in path else OFFERS)
+    db.upsert_product(conn, "B00NLVM6WK")
+    db.add_snapshot(conn, "B00NLVM6WK", "keepa", buy_box=20.0, monthly_sold=400, avg_price_90=23.0)
+    assert spapi.refresh_market(conn, ["B00NLVM6WK", "GS00000001"]) == {"updated": 1, "not_found": 0}
+    p = dict(conn.execute("SELECT * FROM products WHERE asin='B00NLVM6WK'").fetchone())
+    assert p["brand"] == "Wild Planet" and p["image_url"] == "https://img/main.jpg" and p["category"] == "Canned Tuna"
+    s = dict(db.latest_snapshot(conn, "B00NLVM6WK"))
+    assert s["buy_box"] == 24.5 and s["sales_rank"] == 842 and s["offer_count"] == 7
+    assert s["fba_offers"] == 3 and s["fbm_offers"] == 4 and s["amazon_price"] == 25.99
+    assert s["monthly_sold"] == 400 and s["avg_price_90"] == 23.0     # Keepa-only fields carried forward

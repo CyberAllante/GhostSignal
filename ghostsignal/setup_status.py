@@ -34,7 +34,7 @@ def checklist(conn) -> list[dict]:
          "how": "Setup → Your area"},
         {"key": "spapi", "label": "Amazon Seller API", "cost": "Free",
          "done": spapi.configured(),
-         "what": "Real gated check for YOUR account + Amazon's real fees.",
+         "what": "Real gated check for YOUR account, Amazon's real fees, plus price, rank and offers (a free stand-in for Keepa).",
          "how": "Seller Central → Apps and Services → Develop Apps (see SETUP.md), add SPAPI_* to .env"},
         {"key": "keepa", "label": "Keepa API", "cost": "Paid monthly",
          "done": bool(os.environ.get("KEEPA_API_KEY")),

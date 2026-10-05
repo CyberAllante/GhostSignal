@@ -1,6 +1,9 @@
 """Amazon Selling Partner API (SP-API): the official, free API for your seller account.
 
 What we use it for:
+  - Market data (free Keepa stand-in): Catalog Items gives title/brand/image/category/sales rank,
+    Pricing item-offers gives Buy Box price, offer counts and whether Amazon is selling it.
+    No price history or sales/month — those still need Keepa.
   - Gated check: Listings Restrictions API tells us, for YOUR account, whether
     an ASIN is ungated, needs approval, or can't be sold.
   - Real fees: Product Fees API returns Amazon's actual referral + FBA fee.
@@ -143,3 +146,111 @@ def update_fees(conn, asins: list[str]) -> int:
         done += 1
         time.sleep(1.1)  # fees API allows ~1 request/second
     return done
+
+
+# ---------------------------------------------------------------- market data (Keepa stand-in)
+
+AMAZON_SELLER_ID = "ATVPDKIKX0DER"   # Amazon.com's own seller ID in the US marketplace
+_CARRY = ("avg_price_90", "monthly_sold", "referral_pct", "fba_fee", "ebay_sold_price")
+
+
+def _amt(x) -> float | None:
+    v = (x or {}).get("Amount")
+    return float(v) if v is not None else None
+
+
+def _landed(price: dict | None) -> float | None:
+    """Landed price if present (price + shipping), else listing price."""
+    return _amt((price or {}).get("LandedPrice")) or _amt((price or {}).get("ListingPrice"))
+
+
+def parse_catalog_item(item: dict) -> tuple[dict, int | None]:
+    """-> (product fields, sales rank) from one Catalog Items 2022-04-01 item."""
+    summ = next((x for x in item.get("summaries") or [] if x.get("marketplaceId") == MARKETPLACE_US),
+                (item.get("summaries") or [{}])[0] if item.get("summaries") else {})
+    cat = (summ.get("browseClassification") or {}).get("displayName") or ""
+    ranks = next((x for x in item.get("salesRanks") or [] if x.get("marketplaceId") == MARKETPLACE_US),
+                 (item.get("salesRanks") or [{}])[0] if item.get("salesRanks") else {})
+    group, classes = ranks.get("displayGroupRanks") or [], ranks.get("classificationRanks") or []
+    rank = (group[0] if group else classes[0] if classes else {}).get("rank")
+    if not cat and group:
+        cat = group[0].get("title") or ""
+    imgs = next((x for x in item.get("images") or [] if x.get("marketplaceId") == MARKETPLACE_US),
+                (item.get("images") or [{}])[0] if item.get("images") else {})
+    main = next((i for i in imgs.get("images") or [] if i.get("variant") == "MAIN"), None)
+    product = {"title": summ.get("itemName"), "brand": summ.get("brand") or summ.get("manufacturer"),
+               "category": cat, "image_url": (main or {}).get("link")}
+    return product, rank
+
+
+def parse_offers(payload: dict) -> dict:
+    """-> snapshot fields from a getItemOffers payload (Buy Box, offer counts, Amazon on listing)."""
+    summ = payload.get("Summary") or {}
+    offers = payload.get("Offers") or []
+    box = next((b for b in summ.get("BuyBoxPrices") or [] if str(b.get("condition", "")).lower() == "new"), None)
+    buy_box = _landed(box)
+    if buy_box is None:   # fall back to the Buy Box winner, then the cheapest new offer
+        win = next((o for o in offers if o.get("IsBuyBoxWinner")), None)
+        if win:
+            buy_box = (_amt(win.get("ListingPrice")) or 0) + (_amt(win.get("Shipping")) or 0) or None
+    if buy_box is None:
+        lows = [_landed(l) for l in summ.get("LowestPrices") or [] if str(l.get("condition", "")).lower() == "new"]
+        lows = [l for l in lows if l]
+        buy_box = min(lows) if lows else None
+    by_channel = {"fba": 0, "fbm": 0}
+    for n in summ.get("NumberOfOffers") or []:
+        if str(n.get("condition", "")).lower() != "new":
+            continue
+        by_channel["fba" if str(n.get("fulfillmentChannel", "")).lower() == "amazon" else "fbm"] += int(n.get("OfferCount") or 0)
+    total = by_channel["fba"] + by_channel["fbm"] or summ.get("TotalOfferCount")
+    amazon = next((o for o in offers if o.get("SellerId") == AMAZON_SELLER_ID), None)
+    return {"buy_box": buy_box, "offer_count": total, "fba_offers": by_channel["fba"], "fbm_offers": by_channel["fbm"],
+            "amazon_price": ((_amt(amazon.get("ListingPrice")) or 0) + (_amt(amazon.get("Shipping")) or 0)) or None
+            if amazon else None}
+
+
+def _catalog(asins: list[str]) -> dict:
+    data = _call("GET", "/catalog/2022-04-01/items", {
+        "identifiers": ",".join(asins), "identifiersType": "ASIN", "marketplaceIds": MARKETPLACE_US,
+        "includedData": "summaries,salesRanks,images", "pageSize": 20})
+    return {i["asin"]: i for i in data.get("items") or [] if i.get("asin")}
+
+
+def _offers(asins: list[str]) -> dict:
+    data = _call("POST", "/batches/products/pricing/v0/itemOffers", body={"requests": [{
+        "uri": f"/products/pricing/v0/items/{a}/offers", "method": "GET",
+        "MarketplaceId": MARKETPLACE_US, "ItemCondition": "New", "CustomerType": "Consumer"} for a in asins]})
+    out = {}
+    for r in data.get("responses") or []:
+        payload = (r.get("body") or {}).get("payload") or {}
+        if (r.get("status") or {}).get("statusCode") == 200 and payload.get("ASIN"):
+            out[payload["ASIN"]] = payload
+    return out
+
+
+def refresh_market(conn, asins: list[str]) -> dict:
+    """Pull title/brand/image/rank + Buy Box/offers for ASINs and store a snapshot. Free, no Keepa needed."""
+    done = skipped = 0
+    asins = [a for a in dict.fromkeys(asins) if len(a) == 10 and not a.startswith("GS")]
+    for i in range(0, len(asins), 20):
+        batch = asins[i:i + 20]
+        items = _catalog(batch)
+        time.sleep(0.6)
+        offers = _offers(batch)
+        for asin in batch:
+            if asin not in items and asin not in offers:
+                skipped += 1
+                continue
+            product, rank = parse_catalog_item(items.get(asin, {}))
+            snap = parse_offers(offers.get(asin, {})) if asin in offers else {}
+            prev = db.latest_snapshot(conn, asin)
+            carry = {k: prev[k] for k in _CARRY if prev and prev[k] is not None}
+            if snap.get("buy_box") is None and prev:      # no Buy Box now: keep the last known price
+                snap["buy_box"] = prev["buy_box"]
+            db.upsert_product(conn, asin, last_checked=db.now(), **product)
+            db.add_snapshot(conn, asin, "spapi", sales_rank=rank, **{**carry, **snap})
+            done += 1
+        conn.commit()
+        if i + 20 < len(asins):
+            time.sleep(10)   # item-offers batch allows ~1 request per 10 seconds sustained
+    return {"updated": done, "not_found": skipped}
