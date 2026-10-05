@@ -6,7 +6,7 @@ import json
 import os
 import urllib.request
 
-from . import db
+from . import db, restrictions
 from .scoring import Config, score_product
 from .sources import marketplace_links, retailer_links
 
@@ -28,6 +28,10 @@ def evaluate(conn, asin: str, cfg: Config | None = None):
     sig = score_product(dict(product), dict(snap) if snap else None, sources, orders,
                         _enrichment(conn, asin), cfg, db.get_eligibility(conn, asin),
                         db.channel_prices(conn, asin))
+    reason = restrictions.check(dict(product), restrictions.parse_list(db.get_setting(conn, restrictions.SETTING)))
+    if reason:
+        sig.verdict, sig.score, sig.restricted = "PASS", 0, reason
+        sig.flags.insert(0, reason)
     return product, snap, sources, orders, sig
 
 
@@ -161,6 +165,7 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "orders": orders,
         "enrichment": _enrichment(conn, asin),
         "gated": sig.gated,
+        "restricted": sig.restricted,
         "channel_prices": db.channel_prices(conn, asin),
         "inventory": db.inventory_rows(conn, asin),
         "eligibility": db.get_eligibility(conn, asin),

@@ -254,3 +254,26 @@ def test_mcp_tools(tmp_path):
     text, _ = call("import_orders", filename="amazon-orders-mom.json", content=json.dumps(
         {"orders": [{"order_id": "1", "asin": "B0NEWPROD1", "title": "New thing", "order_date": "2026-09-01", "quantity": 1}]}))
     assert "Imported 1 order lines for 'mom'" in text
+
+
+def test_amazon_brands_forced_pass_and_archive(conn):
+    db.upsert_product(conn, "B07BH5BYZ7", title="Amazon Basics 100-Pack AA Batteries", brand="Amazon Basics")
+    db.upsert_product(conn, "B000000001", title="Some Cereal 12 oz", brand="Kelloggs")
+    db.upsert_product(conn, "B000000002", title="Gadget", brand="Zorbo Labs")
+    db.add_snapshot(conn, "B07BH5BYZ7", source="manual", buy_box=29.99, sales_rank=500, monthly_sold=3000, offer_count=2)
+    p = engine.product_view(conn, "B07BH5BYZ7")
+    assert p["verdict"] == "PASS" and p["score"] == 0 and "Amazon" in p["restricted"]
+    assert engine.product_view(conn, "B000000001")["restricted"] == ""
+    db.set_setting(conn, "blocked_brands", "Zorbo Labs")
+    assert "blocked list" in engine.product_view(conn, "B000000002")["restricted"]
+    assert db.archive_products(conn, ["B07BH5BYZ7"]) == 1
+    assert conn.execute("SELECT status FROM products WHERE asin='B07BH5BYZ7'").fetchone()[0] == "dead"
+    assert db.archive_products(conn, ["B07BH5BYZ7"], restore=True) == 1
+
+
+def test_outcomes_compare_prediction_to_result(conn):
+    db.upsert_product(conn, "B000000003", title="Thing", brand="Acme")
+    i = db.add_inventory(conn, "B000000003", 2, 5.0, pred={"verdict": "BUY", "score": 80, "profit": 6.0})
+    db.update_inventory(conn, i, status="sold", sold_price=12.0)
+    o = db.outcomes(conn)
+    assert o["by_verdict"]["BUY"]["wins"] == 1 and o["by_verdict"]["BUY"]["profit"] == 14.0 and o["total_profit"] == 14.0

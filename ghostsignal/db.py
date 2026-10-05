@@ -183,6 +183,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                      ("new_count", "INTEGER DEFAULT 0")):
         if col not in have:
             conn.execute(f"ALTER TABLE tracked_sellers ADD COLUMN {col} {ddl}")
+    inv = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)")}
+    for col, ddl in (("pred_verdict", "TEXT"), ("pred_score", "INTEGER"), ("pred_profit", "REAL")):
+        if col not in inv:
+            conn.execute(f"ALTER TABLE inventory ADD COLUMN {col} {ddl}")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
@@ -349,15 +353,18 @@ def new_item_id(conn: sqlite3.Connection) -> str:
 
 
 def add_inventory(conn: sqlite3.Connection, asin: str, qty: int, unit_cost: float | None, store: str = "",
-                  channel: str = "", list_price: float | None = None, notes: str = "") -> int:
+                  channel: str = "", list_price: float | None = None, notes: str = "",
+                  pred: dict | None = None) -> int:
     if channel and channel not in CHANNELS:
         raise ValueError(f"channel must be one of {CHANNELS}")
     upsert_product(conn, asin)
     cur = conn.execute(
-        """INSERT INTO inventory (asin, qty, unit_cost, store, bought_at, channel, list_price, status, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO inventory (asin, qty, unit_cost, store, bought_at, channel, list_price, status, notes,
+                                  pred_verdict, pred_score, pred_profit)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (asin.upper(), int(qty), unit_cost, store, now(), channel, list_price,
-         "listed" if channel and list_price else "in_hand", notes))
+         "listed" if channel and list_price else "in_hand", notes,
+         (pred or {}).get("verdict"), (pred or {}).get("score"), (pred or {}).get("profit")))
     return cur.lastrowid
 
 
@@ -388,3 +395,34 @@ def inventory_rows(conn: sqlite3.Connection, asin: str | None = None) -> list[di
                        if d["status"] == "sold" and d["sold_price"] is not None else None)
         out.append(d)
     return out
+
+
+def archive_products(conn: sqlite3.Connection, asins: list[str], restore: bool = False) -> int:
+    """Hide products from every list (status 'dead') without deleting history; restore puts them back to 'watch'."""
+    asins = [a.strip().upper() for a in asins if a]
+    if not asins:
+        return 0
+    q = ",".join("?" * len(asins))
+    cur = conn.execute(f"UPDATE products SET status = ? WHERE asin IN ({q})", ["watch" if restore else "dead", *asins])
+    return cur.rowcount
+
+
+def outcomes(conn: sqlite3.Connection) -> dict:
+    """Predicted vs actual: how the verdict at purchase time compares with what the lots really made."""
+    sold = [r for r in inventory_rows(conn) if r["status"] == "sold" and r["profit"] is not None]
+    by: dict[str, dict] = {}
+    for r in sold:
+        k = r.get("pred_verdict") or "UNSCORED"
+        d = by.setdefault(k, {"lots": 0, "wins": 0, "profit": 0.0, "predicted": 0.0, "predicted_n": 0})
+        d["lots"] += 1
+        d["wins"] += 1 if r["profit"] > 0 else 0
+        d["profit"] += r["profit"]
+        if r.get("pred_profit") is not None:
+            d["predicted"] += r["pred_profit"] * r["sold_qty"]
+            d["predicted_n"] += 1
+    for d in by.values():
+        d["profit"] = round(d["profit"], 2)
+        d["predicted"] = round(d["predicted"], 2)
+        d["win_rate"] = round(d["wins"] / d["lots"], 2) if d["lots"] else None
+    return {"sold_lots": len(sold), "by_verdict": by,
+            "total_profit": round(sum(r["profit"] for r in sold), 2)}

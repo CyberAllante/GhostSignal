@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, engine, importers, mcp
+from . import db, engine, importers, mcp, restrictions
 
 WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
@@ -189,9 +189,14 @@ def make_handler(db_path):
             try:
                 if url.path in ("/", "/index.html"):
                     return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
+                if url.path == "/api/blocked-brands":
+                    return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
+                if url.path == "/api/outcomes":
+                    return self._send(200, db.outcomes(conn))
                 if url.path == "/api/products":
+                    cmp = "=" if qs.get("archived") else "!="
                     rows = [engine.product_view(conn, r[0]) for r in conn.execute(
-                        "SELECT asin FROM products WHERE status != 'dead'")]
+                        f"SELECT asin FROM products WHERE status {cmp} 'dead'")]
                     if qs.get("verdict"):
                         rows = [r for r in rows if r["verdict"] == qs["verdict"].upper()]
                     if qs.get("q"):
@@ -314,6 +319,16 @@ def make_handler(db_path):
             conn = db.connect(db_path)
             try:
                 body = self._body()
+                if url.path in ("/api/products/archive", "/api/products/restore"):
+                    n = db.archive_products(conn, body.get("asins") or [], restore=url.path.endswith("restore"))
+                    conn.commit()
+                    return self._send(200, {"ok": True, "count": n})
+                if url.path == "/api/blocked-brands":
+                    brands = restrictions.parse_list(body.get("brands") if isinstance(body.get("brands"), str)
+                                                     else "\n".join(body.get("brands") or []))
+                    db.set_setting(conn, restrictions.SETTING, "\n".join(brands))
+                    conn.commit()
+                    return self._send(200, {"brands": brands})
                 m = ASIN_PATH.match(url.path)
                 if m and m.group(2) == "source":
                     db.add_source(conn, m.group(1), body["retailer"], float(body["price"]),
@@ -330,10 +345,12 @@ def make_handler(db_path):
                     conn.commit()
                     return self._send(200, engine.product_view(conn, m.group(1)))
                 if m and m.group(2) == "inventory":
+                    _, _, _, _, sig = engine.evaluate(conn, m.group(1))
                     db.add_inventory(conn, m.group(1), int(body.get("qty") or 1),
                                      float(body["unit_cost"]) if body.get("unit_cost") not in (None, "") else None,
                                      body.get("store") or "", body.get("channel") or "",
-                                     float(body["list_price"]) if body.get("list_price") not in (None, "") else None)
+                                     float(body["list_price"]) if body.get("list_price") not in (None, "") else None,
+                                     pred={"verdict": sig.verdict, "score": sig.score, "profit": sig.economics.profit})
                     conn.commit()
                     return self._send(200, engine.product_view(conn, m.group(1)))
                 im = INV_PATH.match(url.path)

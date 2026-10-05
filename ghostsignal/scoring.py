@@ -65,6 +65,7 @@ class Signal:
     flags: list[str] = field(default_factory=list)
     best_source: dict | None = None
     gated: str = "unknown"            # ungated | approval | blocked | unknown
+    restricted: str = ""              # reason this can never be resold (Amazon brand, your blocklist)
 
 
 def referral_rate(category: str | None, price: float, default: float = 0.15) -> float:

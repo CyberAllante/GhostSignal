@@ -292,6 +292,7 @@
   <div class="foot"><button class="btn" onclick="this.closest('dialog').close()">Cancel</button><button class="btn primary" id="sellerGo">Track</button></div>
 </div></dialog>
 
+<dialog id="dlgClean"><div class="dlg" id="cleanBody"></div></dialog>
 <div id="toast"></div>
 
 <script>
@@ -321,6 +322,7 @@ function ago(iso) {
   return m < 60 ? Math.max(1, Math.round(m)) + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
 }
 function gatedPill(p) {
+  if (p.restricted) return `<span class="pill blocked" title="${esc(p.restricted)}">Can't resell</span>`;
   if (p.asin?.startsWith("GS")) return `<span class="pill ch-none">Not on Amazon</span>`;
   if (p.gated && p.gated !== "unknown") return `<span class="pill ${p.gated}">${GATED[p.gated]}</span>`;
   return p.enrichment?.gating_risk === "high" ? `<span class="pill approval">Likely gated?</span>` : `<span class="pill unknown">Not checked</span>`;
@@ -338,7 +340,7 @@ const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><di
 
 async function pageDashboard() {
   const seq = routeSeq;
-  const [, stats, changes, setup, demo] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup"), api("/api/demo")]);
+  const [, stats, changes, setup, demo, out] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup"), api("/api/demo"), api("/api/outcomes")]);
   const ordersDone = setup.items.find((i) => i.key === "orders")?.done;
   const buys = products.filter((p) => p.verdict === "BUY").length, res = products.filter((p) => p.verdict === "RESEARCH").length;
   const top = products.filter((p) => p.verdict !== "PASS").slice(0, 8);
@@ -377,7 +379,12 @@ async function pageDashboard() {
           <div class="card-b"><div style="height:8px;background:var(--row);border-radius:99px;overflow:hidden"><div style="height:100%;width:${(done / setup.items.length) * 100}%;background:var(--navy)"></div></div>
           <div class="hint" style="margin-top:8px">Next: ${esc(setup.items.find((i) => !i.done)?.label || "All set")}</div></div></div>
       </div>
-    </div>`)) return;
+    </div>
+    <div class="card" style="margin-top:24px"><div class="card-h"><div><h2>How your buys performed</h2><p>What the app predicted when you bought, against what actually happened</p></div></div>
+      <div class="card-b">${out.sold_lots ? `<table><thead><tr><th>Verdict when you bought</th><th class="num">Lots sold</th><th class="num">Made money</th><th class="num">Win rate</th><th class="num">Predicted</th><th class="num">Actual</th></tr></thead><tbody>
+        ${Object.entries(out.by_verdict).map(([v, d]) => `<tr><td>${LABEL[v] || "Not scored"}</td><td class="num">${d.lots}</td><td class="num">${d.wins}</td><td class="num">${pct(d.win_rate)}</td><td class="num">${d.predicted_n ? money(d.predicted) : "—"}</td><td class="num ${cls(d.profit)}">${money(d.profit)}</td></tr>`).join("")}</tbody></table>
+        <div class="hint" style="margin-top:8px">Total profit ${money(out.total_profit)}. If Buy lots win more than Research lots, the scoring is working.</div>`
+        : `<div class="hint">Nothing sold yet. Use <b>I bought this</b> on a product, then mark it Sold in Inventory. After a few sales this shows which verdicts actually make money.</div>`}</div></div>`)) return;
 }
 
 const COLS = [
@@ -398,6 +405,7 @@ async function pageProducts(params) {
     <div class="page-head"><div><h1>Products</h1><p>Every product you're watching. Click a row for details.</p></div>
       <div class="actions">
         <button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button>
+        <button class="btn" onclick="openClean()">${icon("x")}Clean up</button>
         <button class="btn" onclick="copyAsins()">${icon("copy")}Copy ASINs</button>
         <a class="btn" href="/api/export.csv">${icon("dl")}Export</a>
         <button class="btn primary" onclick="openAdd()">${icon("plus")}Add products</button></div></div>
@@ -645,6 +653,35 @@ async function openDrawer(asin) { drawer(await api(`/api/products/${asin}`)); $(
 function closeDrawer() { $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
 
 /* ---------- actions ---------- */
+/* ---------- clean up ---------- */
+const CLEAN = [
+  ["restricted", "Amazon-owned or blocked brands", "Amazon Basics, Solimo, Happy Belly and anything on your blocked list. Only Amazon (or you) can't sell these.", (p) => !!p.restricted],
+  ["cant", "You can't sell on any channel", "Marked Can't sell with no eBay or Facebook route.", (p) => p.gated === "blocked" && !p.economics.best_channel && !p.restricted],
+  ["pass", "Everything that scores Pass", "Includes the two above. Archived products are hidden, not deleted, and come back if you restore them.", (p) => p.verdict === "PASS"],
+];
+async function openClean() {
+  await loadProducts();
+  const [arch, bb] = await Promise.all([api("/api/products?archived=1"), api("/api/blocked-brands")]);
+  $("#cleanBody").innerHTML = `<h2>Clean up products</h2>
+    <p style="color:var(--muted);margin:0 0 14px">Hide what you can't or won't sell so the list only shows real opportunities. Nothing is deleted.</p>
+    ${CLEAN.map(([k, t, d, f]) => { const n = products.filter(f).length; return `<div class="mini-row" style="align-items:center"><div style="flex:1;min-width:0"><div class="t">${t} <b>(${n})</b></div><div class="s">${d}</div></div>
+      <button class="btn sm" data-clean="${k}" ${n ? "" : "disabled"}>Archive</button></div>`; }).join("")}
+    <div class="field" style="margin-top:14px"><label>Brands you never want to see <span style="font-weight:400;color:var(--muted)">(one per line)</span></label>
+      <textarea id="blockBrands" placeholder="Nike&#10;Disney&#10;Apple">${esc(bb.brands.join("\n"))}</textarea></div>
+    <div class="foot" style="justify-content:space-between">
+      <button class="btn" id="restoreAll" ${arch.length ? "" : "disabled"}>Restore ${arch.length} archived</button>
+      <span><button class="btn" onclick="this.closest('dialog').close()">Close</button> <button class="btn primary" id="saveBrands">Save brand list</button></span></div>`;
+  $("#dlgClean").showModal();
+  $("#cleanBody").querySelectorAll("[data-clean]").forEach((b) => (b.onclick = async () => {
+    const f = CLEAN.find((c) => c[0] === b.dataset.clean)[3], list = products.filter(f);
+    if (!confirm(`Archive ${list.length} products?`)) return;
+    await api("/api/products/archive", { asins: list.map((p) => p.asin) });
+    toast(`Archived ${list.length}`); $("#dlgClean").close(); route();
+  }));
+  $("#restoreAll").onclick = async () => { await api("/api/products/restore", { asins: arch.map((p) => p.asin) }); toast(`Restored ${arch.length}`); $("#dlgClean").close(); route(); };
+  $("#saveBrands").onclick = async () => { await api("/api/blocked-brands", { brands: $("#blockBrands").value }); toast("Saved. Run a scan to apply."); $("#dlgClean").close(); route(); };
+}
+
 async function clearDemo() {
   if (!confirm("Remove the sample products? Anything you imported stays.")) return;
   const r = await api("/api/demo/clear", {}); toast(`Removed ${r.removed} sample products`); route();
