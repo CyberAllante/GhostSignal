@@ -52,7 +52,7 @@ def targets(conn) -> dict:
     brands: dict[str, list] = {}
     closed = 0
     for (asin,) in conn.execute("SELECT asin FROM products WHERE status != 'dead'").fetchall():
-        v = engine.product_view(conn, asin)
+        v = engine.list_view(conn, asin)
         el = v.get("eligibility") or {}
         if v["gated"] == "blocked" and "not currently accepting" in (el.get("reason") or ""):
             closed += 1

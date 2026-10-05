@@ -52,6 +52,7 @@ def refresh_in_background(db_path, stale_days=None):
             c = db.connect(db_path)
             run_pipeline(c, stale_days)
             c.close()
+            _invalidate_lists()
         except Exception as e:
             print("background refresh failed:", e, flush=True)
         finally:
@@ -68,11 +69,13 @@ PIN_MAX_FAILS, PIN_LOCK_SECONDS = 5, 3600
 
 
 _list_cache = {"key": None, "at": 0.0, "rows": None}
-LIST_TTL = 30
+_ungate_cache = {"at": 0.0, "data": None}
+LIST_TTL = 60
 
 
 def _invalidate_lists():
     _list_cache["at"] = 0.0
+    _ungate_cache["at"] = 0.0
 
 
 def make_handler(db_path):
@@ -230,14 +233,16 @@ def make_handler(db_path):
                 if url.path == "/api/invites":
                     return self._send(200, invites.listing(conn))
                 if url.path == "/api/ungate":
-                    return self._send(200, ungate.targets(conn))
+                    if time.time() - _ungate_cache["at"] > LIST_TTL or _ungate_cache["data"] is None:
+                        _ungate_cache.update(at=time.time(), data=ungate.targets(conn))
+                    return self._send(200, _ungate_cache["data"])
                 if url.path == "/api/outcomes":
                     return self._send(200, db.outcomes(conn))
                 if url.path == "/api/products":
                     archived = bool(qs.get("archived"))
                     full = bool(qs.get("full"))
                     key = (archived, full)
-                    if _list_cache["key"] == key and time.time() - _list_cache["at"] < LIST_TTL and not is_running():
+                    if _list_cache["key"] == key and time.time() - _list_cache["at"] < LIST_TTL:
                         rows = list(_list_cache["rows"])
                     else:
                         view = engine.product_view if full else engine.list_view

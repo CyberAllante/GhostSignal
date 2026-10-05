@@ -198,5 +198,5 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "orders": {"orders": orders.get("orders") or 0},
         "best_source": {"retailer": sig.best_source["retailer"]} if sig.best_source else None,
         "enrichment": {"gating_risk": enr.get("gating_risk")} if enr else None,
-        "eligibility": {"approval_url": el.get("approval_url")} if el else None,
+        "eligibility": {"approval_url": el.get("approval_url"), "reason": el.get("reason"), "status": el.get("status")} if el else None,
     }
