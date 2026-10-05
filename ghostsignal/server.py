@@ -65,8 +65,11 @@ def make_handler(db_path):
     root = Path(__file__).resolve().parent.parent
 
     class Handler(BaseHTTPRequestHandler):
+        def _session(self) -> str:
+            return hmac.new(password.encode(), b"gs-session-v1", "sha256").hexdigest()
+
         def _authed(self) -> bool:
-            """HTTP Basic auth. Any username, password = GHOSTSIGNAL_PASSWORD. /health is open."""
+            """Session cookie (login page), or Basic/Bearer for scripts + MCP. /health, /login, PWA assets are open."""
             if not password or self.path == "/health":
                 return True
             header = self.headers.get("Authorization", "")
@@ -79,11 +82,43 @@ def make_handler(db_path):
                         return True
                 except Exception:
                     pass
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="GhostSignal"')
+            for part in self.headers.get("Cookie", "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "gs_session" and hmac.compare_digest(v.encode(), self._session().encode()):
+                    return True
+            if self.command == "GET" and "text/html" in self.headers.get("Accept", ""):
+                self.send_response(302)
+                self.send_header("Location", "/login")
+            else:
+                self.send_response(401)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return False
+
+        def _public_asset(self, path) -> bool:
+            assets = {
+                "/login": ("login.html", "text/html; charset=utf-8"),
+                "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+                "/icon.svg": ("icon.svg", "image/svg+xml"),
+            }
+            if path not in assets:
+                return False
+            name, ctype = assets[path]
+            self._send(200, (WEB / name).read_bytes(), ctype)
+            return True
+
+        def _login(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            given = parse_qs(self.rfile.read(n).decode()).get("password", [""])[0]
+            if password and hmac.compare_digest(given.encode(), password.encode()):
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", f"gs_session={self._session()}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax")
+            else:
+                self.send_response(302)
+                self.send_header("Location", "/login?error=1")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def log_message(self, fmt, *args):  # quieter
             pass
@@ -120,6 +155,16 @@ def make_handler(db_path):
             return f"{proto}://{self.headers.get('Host', 'localhost')}"
 
         def do_GET(self):
+            path = urlparse(self.path).path
+            if path == "/logout":
+                self.send_response(302)
+                self.send_header("Location", "/login")
+                self.send_header("Set-Cookie", "gs_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            if self._public_asset(path):
+                return None
             if self.path.startswith("/mcp"):
                 if not self._authed():
                     return None
@@ -247,6 +292,8 @@ def make_handler(db_path):
 
         def do_POST(self):
             url = urlparse(self.path)
+            if url.path == "/login":
+                return self._login()
             if url.path == "/api/ingest/orders":
                 return self._ingest(url)
             if not self._authed():

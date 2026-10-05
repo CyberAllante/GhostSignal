@@ -20,4 +20,4 @@ gs = "ghostsignal.cli:main"
 include = ["ghostsignal*"]
 
 [tool.setuptools.package-data]
-ghostsignal = ["web/*.html"]
+ghostsignal = ["web/*"]

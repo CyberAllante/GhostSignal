@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostSignal</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#142C51">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #142C51; font: 15px/1.5 Inter, system-ui, sans-serif; color: #111827; }
+  form { background: #fff; width: min(380px, calc(100% - 32px)); padding: 32px; border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+  img { width: 52px; height: 52px; border-radius: 12px; display: block; margin-bottom: 18px; }
+  h1 { margin: 0 0 4px; font-size: 22px; } p { margin: 0 0 22px; color: #6b7280; font-size: 13px; }
+  input { width: 100%; padding: 12px 14px; font-size: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; }
+  input:focus { outline: 2px solid #142C51; border-color: transparent; }
+  button { width: 100%; padding: 12px; font-size: 15px; font-weight: 600; background: #142C51; color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
+  .err { display: none; color: #b91c1c; font-size: 13px; margin: -2px 0 12px; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <img src="/icon.svg" alt="">
+  <h1>GhostSignal</h1>
+  <p>Find the signal. Make the move.</p>
+  <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+  <div class="err" id="err">Wrong password. Try again.</div>
+  <button type="submit">Sign in</button>
+</form>
+<script>if (location.search.includes("error")) document.getElementById("err").style.display = "block";</script>
+</body>
+</html>
