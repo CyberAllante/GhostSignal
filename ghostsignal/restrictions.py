@@ -26,6 +26,9 @@ TITLE_PHRASES = re.compile(
 DIGITAL_GOODS = re.compile(
     r"(gift\s*cards?|e-?gift|balance\s+(auto-?)?reload|(e-?mail|email)\s+delivery|digital\s+code|\[digital)", re.I)
 
+# Receipt line items that aren't products at all (deposits, deli counter, fees).
+NON_PRODUCTS = re.compile(r"(container\s+deposit|prepared\s+foods|bag\s+fee|delivery\s+fee|service\s+fee)", re.I)
+
 SETTING = "blocked_brands"
 
 
@@ -43,6 +46,8 @@ def check(product: dict, custom: list[str] | None = None) -> str:
     nb = _norm(brand)
     if DIGITAL_GOODS.search(title):
         return "Gift card / digital item — can't be resold"
+    if NON_PRODUCTS.search(title):
+        return "Not a real product (deposit / deli / fee line item)"
     if nb in AMAZON_BRANDS:
         return f"Amazon-owned brand ({brand}) — only Amazon can sell it"
     if TITLE_PHRASES.search(title) and (not nb or nb in AMAZON_BRANDS):
