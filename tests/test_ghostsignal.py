@@ -406,3 +406,21 @@ def test_invite_flow(tmp_path, monkeypatch):
     with pytest.raises(urllib.error.HTTPError):               # an invite can't read anything
         get(f"/api/products?token={code}")
     srv.shutdown()
+
+
+def test_approval_tracking_clears_gating_on_approve(conn):
+    from ghostsignal import ungate
+    db.upsert_product(conn, "B000000011", title="Cereal", brand="Kelloggs")
+    db.set_eligibility(conn, "B000000011", "approval", "spapi", "You need approval to list in the Grocery & Gourmet Foods category.")
+    t = ungate.targets(conn)
+    assert t["categories"][0]["name"] == "Grocery & Gourmet Foods" and t["categories"][0]["tracking"]["status"] == "not_started"
+    ungate.set_approval(conn, "Grocery & Gourmet Foods", "applying", "KeHE invoice sent")
+    assert ungate.targets(conn)["categories"][0]["tracking"]["note"] == "KeHE invoice sent"
+    ungate.set_approval(conn, "Grocery & Gourmet Foods", "approved")
+    assert db.get_eligibility(conn, "B000000011") is None      # cleared so the next run re-checks it
+
+
+def test_list_view_is_slim(conn):
+    db.upsert_product(conn, "B000000012", title="Thing", brand="Acme")
+    v = engine.list_view(conn, "B000000012")
+    assert set(v) >= {"asin", "verdict", "gated", "economics", "snapshot", "orders"} and "history" not in v and "links" not in v

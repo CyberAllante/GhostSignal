@@ -179,3 +179,24 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
                   "retail": retailer_links(product["title"], product["upc"])},
         "history": history,
     }
+
+
+def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
+    """The slim version of product_view for lists and tables (about a tenth of the size)."""
+    product, snap, _sources, orders, sig = evaluate(conn, asin, cfg)
+    e = sig.economics
+    s = dict(snap) if snap else None
+    enr = _enrichment(conn, asin)
+    el = db.get_eligibility(conn, asin)
+    return {
+        "asin": asin, "title": product["title"], "brand": product["brand"], "category": product["category"],
+        "image_url": product["image_url"], "status": product["status"],
+        "verdict": sig.verdict, "score": sig.score, "gated": sig.gated, "restricted": sig.restricted,
+        "economics": {k: getattr(e, k, None) for k in ("sale_price", "cost", "max_cost", "profit", "roi", "best_channel",
+                                                         "referral_fee", "fba_fee")},
+        "snapshot": {k: s.get(k) for k in ("sales_rank", "monthly_sold", "offer_count", "captured_at", "amazon_price")} if s else None,
+        "orders": {"orders": orders.get("orders") or 0},
+        "best_source": {"retailer": sig.best_source["retailer"]} if sig.best_source else None,
+        "enrichment": {"gating_risk": enr.get("gating_risk")} if enr else None,
+        "eligibility": {"approval_url": el.get("approval_url")} if el else None,
+    }

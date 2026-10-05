@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hmac
 import io
 import zipfile
@@ -64,6 +65,14 @@ def is_running() -> bool:
 
 _pin_fails = {"n": 0, "locked_until": 0.0}
 PIN_MAX_FAILS, PIN_LOCK_SECONDS = 5, 3600
+
+
+_list_cache = {"key": None, "at": 0.0, "rows": None}
+LIST_TTL = 30
+
+
+def _invalidate_lists():
+    _list_cache["at"] = 0.0
 
 
 def make_handler(db_path):
@@ -143,8 +152,14 @@ def make_handler(db_path):
 
         def _send(self, code, body, ctype="application/json"):
             data = body if isinstance(body, bytes) else json.dumps(body, default=str).encode()
+            zipped = len(data) > 2048 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+            if zipped:
+                data = gzip.compress(data, compresslevel=5)
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            if zipped:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -219,9 +234,16 @@ def make_handler(db_path):
                 if url.path == "/api/outcomes":
                     return self._send(200, db.outcomes(conn))
                 if url.path == "/api/products":
-                    cmp = "=" if qs.get("archived") else "!="
-                    rows = [engine.product_view(conn, r[0]) for r in conn.execute(
-                        f"SELECT asin FROM products WHERE status {cmp} 'dead'")]
+                    archived = bool(qs.get("archived"))
+                    full = bool(qs.get("full"))
+                    key = (archived, full)
+                    if _list_cache["key"] == key and time.time() - _list_cache["at"] < LIST_TTL and not is_running():
+                        rows = list(_list_cache["rows"])
+                    else:
+                        view = engine.product_view if full else engine.list_view
+                        rows = [view(conn, r[0]) for r in conn.execute(
+                            f"SELECT asin FROM products WHERE status {'=' if archived else '!='} 'dead'")]
+                        _list_cache.update(key=key, at=time.time(), rows=list(rows))
                     if qs.get("verdict"):
                         rows = [r for r in rows if r["verdict"] == qs["verdict"].upper()]
                     if qs.get("q"):
@@ -380,6 +402,7 @@ def make_handler(db_path):
             self.wfile.write(data)
 
         def do_POST(self):
+            _invalidate_lists()
             url = urlparse(self.path)
             if url.path == "/login":
                 return self._login()
@@ -407,6 +430,12 @@ def make_handler(db_path):
                     code = invites.create(conn, body.get("label") or "")
                     conn.commit()
                     return self._send(200, {"code": code, "url": f"{self._public_url()}/contribute?c={code}"})
+                if url.path == "/api/approvals":
+                    r = ungate.set_approval(conn, body["name"], body["status"], body.get("note"))
+                    conn.commit()
+                    if body["status"] == "approved":
+                        refresh_in_background(db_path)
+                    return self._send(200, r)
                 if url.path == "/api/invites/revoke":
                     ok = invites.revoke(conn, body.get("code") or "")
                     conn.commit()

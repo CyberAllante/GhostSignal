@@ -401,6 +401,14 @@ def t_revoke_invite(conn, a):
     return "Revoked. Their past orders stay." if ok else "No invite with that code."
 
 
+def t_set_approval(conn, a):
+    from . import ungate
+    r = ungate.set_approval(conn, a["name"], a["status"], a.get("note"))
+    conn.commit()
+    tail = " Cleared its old gating answers; call run_now to re-check." if a["status"] == "approved" else ""
+    return f"{a['name']}: {r['status']}" + (f" ({r.get('note')})" if r.get("note") else "") + "." + tail
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -446,6 +454,8 @@ TOOLS = {
     "invite_friend": _tool(t_invite_friend, "Make a share link so a friend can add their Amazon order history (filed under the label you give).", {"label": S}, ["label"]),
     "list_invites": _tool(t_list_invites, "Invite links and how many order lines each friend has sent."),
     "revoke_invite": _tool(t_revoke_invite, "Turn off one friend's invite link.", {"code": S}, ["code"]),
+    "set_approval": _tool(t_set_approval, "Track an ungating application for a category or brand (name exactly as in ungate_targets).",
+                          {"name": S, "status": {"type": "string", "enum": ["not_started", "applying", "approved", "rejected"]}, "note": S}, ["name", "status"]),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

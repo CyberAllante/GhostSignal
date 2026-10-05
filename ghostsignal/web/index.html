@@ -316,7 +316,9 @@ const paint = (seq, html) => { if (seq === routeSeq) $("#main").innerHTML = html
 let products = [], view = { verdict: "", q: "", gated: "", cat: "", maxRank: "", minPrice: "", maxPrice: "", sort: "score", dir: -1 }, timer;
 
 function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3500); }
+let productsAt = 0;
 async function api(path, body) {
+  if (body) productsAt = 0;   // any change: reload the product list next time
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return (r.headers.get("content-type") || "").includes("json") ? r.json() : r.text();
@@ -340,7 +342,10 @@ const fav = (r) => `<img class="fav" alt="" src="https://www.google.com/s2/favic
 const thumb = (p) => p.image_url ? `<span class="thumb" style="background-image:url('${esc(p.image_url)}')"></span>` : `<span class="thumb">${esc((p.title || p.asin || "?")[0])}</span>`;
 
 /* ---------- pages ---------- */
-async function loadProducts() { products = await api("/api/products"); $("#navProducts").textContent = products.length || ""; }
+async function loadProducts(force) {
+  if (force || !products.length || Date.now() - productsAt > 30000) { products = await api("/api/products"); productsAt = Date.now(); }
+  $("#navProducts").textContent = products.length || "";
+}
 const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><div class="top"><span class="chip ${c}">${icon(ic)}</span><svg class="i" style="color:#d1d5db;width:16px"><use href="#i-arrow"/></svg></div><div class="n">${n}</div><div class="l">${l}</div></a>`;
 
 const sub = (p) => {
@@ -552,18 +557,47 @@ async function pageFriends() {
   $("#main").querySelectorAll("[data-revoke]").forEach((b) => (b.onclick = async () => { if (!confirm("Turn off this link? Their past orders stay.")) return; await api("/api/invites/revoke", { code: b.dataset.revoke }); toast("Link turned off"); pageFriends(); }));
 }
 
+const APPR = { not_started: "Not started", applying: "Applying", approved: "Approved", rejected: "Rejected" };
+const SUPPLIERS = [
+  ["Grocery & Gourmet", "KeHE, Frontier Co-op (natural foods, spices)"],
+  ["Pet supplies", "Lee Mar"],
+  ["Sports & outdoors", "BSN Sports, Soccer.com"],
+  ["Office products", "Bulk Office Supply"],
+  ["Automotive", "Turn 14 Distribution"],
+  ["Also named in the post", "Bangalla, EE Distribution, Frontline, Bilobeauty, Everest Toys, Round Eye Supply"],
+];
 async function pageUngate() {
   const seq = routeSeq;
   const t = await api("/api/ungate");
-  const table = (rows, label) => rows.length ? `<div class="table-wrap"><table><thead><tr><th>${label}</th><th class="num">Products</th><th class="num">Strong</th><th class="num">Best rank</th><th class="num">Median price</th><th>Examples</th><th></th></tr></thead><tbody>
-    ${rows.map((g) => `<tr><td><b>${esc(g.name)}</b></td><td class="num">${g.products}</td><td class="num pos">${g.strong}</td><td class="num">${num(g.best_rank)}</td><td class="num">${money(g.median_price)}</td>
-      <td class="dim" style="max-width:360px">${g.examples.map(esc).join(" · ")}</td>
+  const table = (rows, label) => rows.length ? `<div class="table-wrap"><table><thead><tr><th>${label}</th><th>Your status</th><th class="num">Products</th><th class="num">Strong</th><th class="num">Best rank</th><th class="num">Median price</th><th>Examples</th><th></th></tr></thead><tbody>
+    ${rows.map((g) => `<tr><td><b>${esc(g.name)}</b>${g.tracking.note ? `<div class="dim" style="font-size:12px">${esc(g.tracking.note)}</div>` : ""}</td>
+      <td><select data-appr="${esc(g.name)}" style="padding:4px 6px;font-size:12px">${Object.entries(APPR).map(([k, l]) => `<option value="${k}" ${g.tracking.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+      <td class="num">${g.products}</td><td class="num pos">${g.strong}</td><td class="num">${num(g.best_rank)}</td><td class="num">${money(g.median_price)}</td>
+      <td class="dim" style="max-width:320px">${g.examples.map(esc).join(" · ")}</td>
       <td class="num">${g.approval_url ? `<a class="btn sm" href="${esc(g.approval_url)}" target="_blank" rel="noopener">Apply ↗</a>` : ""}</td></tr>`).join("")}</tbody></table></div>`
-    : `<div class="empty">Nothing here yet. Run a scan so gating is checked first.</div>`;
+    : `<div class="empty">Nothing here yet. Refresh data so gating is checked first.</div>`;
   if (!paint(seq, `
     <div class="page-head"><div><h1>Ungate</h1><p>Which approvals would unlock the most good products. One category approval opens everything in it.</p></div></div>
+    <details class="card" style="margin-bottom:24px;padding:18px 20px"><summary style="cursor:pointer;font-weight:600">How to get approved</summary>
+      <div style="margin-top:12px;line-height:1.6">
+        <ol style="margin:0 0 12px;padding-left:20px">
+          <li>Buy from an <b>authorized distributor or the brand</b>, not a store. Retail receipts don't count. Usually at least 10 units of the product, on one invoice.</li>
+          <li>The name and address on the invoice must <b>exactly match</b> your legal entity in Seller Central (Settings → Account Info), not your store name. Check that page has no open requirements first.</li>
+          <li>Apply from the product's <b>Apply</b> link. You can highlight the product on the invoice. A paid invoice helps.</li>
+          <li>Rejected? Reapply on the same case, or open a new case to get a different reviewer. Many sellers need several tries. Calling Seller Support with the case open can help.</li>
+          <li>New accounts with no sales get rejected more. Selling ungated products first builds history.</li>
+        </ol>
+        <div class="hint" style="margin-bottom:12px"><b>Never edit or fake an invoice.</b> Amazon checks with suppliers, and altered documents get accounts suspended.</div>
+        <div style="font-weight:600;margin-bottom:6px">Suppliers sellers report work for ungating</div>
+        ${SUPPLIERS.map(([c, n]) => `<div class="dim" style="font-size:13px"><b style="color:var(--text)">${c}:</b> ${n}</div>`).join("")}
+        <div class="hint" style="margin-top:8px">From a Reddit list by a wholesale coach. Not verified. Commenters said Walgreens doesn't issue invoices, so it's left off. Confirm a supplier is authorized for the brand before you buy.</div>
+      </div></details>
     <div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>Category approvals</h2><p>Strong = ranked under 50,000 and priced $10+</p></div></div><div class="card-b" style="padding:0">${table(t.categories, "Category")}</div></div>
     <div class="card"><div class="card-h"><div><h2>Brand approvals</h2><p>${t.closed_to_applications} more products are in brands Amazon isn't accepting applications for right now</p></div></div><div class="card-b" style="padding:0">${table(t.brands, "Brand")}</div></div>`)) return;
+  $("#main").querySelectorAll("[data-appr]").forEach((sel) => (sel.onchange = async () => {
+    await api("/api/approvals", { name: sel.dataset.appr, status: sel.value });
+    toast(sel.value === "approved" ? "Marked approved. Re-checking those products now." : "Saved");
+  }));
 }
 
 async function pageSellers() {
@@ -777,7 +811,7 @@ async function copyAsins() {
 async function scan() {
   const r = await api("/api/refresh", {});
   toast(r.started ? "Pulling fresh data from Amazon. This takes a while; the page updates when it's done." : "A data pull is already running.");
-  const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); route(); } }, 10000);
+  const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); productsAt = 0; route(); } }, 10000);
 }
 async function refreshSellers(b) {
   b.disabled = true;

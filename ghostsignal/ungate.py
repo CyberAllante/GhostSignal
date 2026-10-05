@@ -8,10 +8,35 @@ that brand. We group the gated products by those requirements and rank them by h
 
 from __future__ import annotations
 
+import json
 import re
 import statistics
 
-from . import engine
+from . import db, engine
+
+STATUSES = ("not_started", "applying", "approved", "rejected")
+
+
+def approvals(conn) -> dict:
+    return json.loads(db.get_setting(conn, "approvals") or "{}")
+
+
+def set_approval(conn, name: str, status: str, note: str | None = None) -> dict:
+    if status not in STATUSES:
+        raise ValueError(f"status must be one of {STATUSES}")
+    data = approvals(conn)
+    cur = data.get(name, {})
+    cur.update(status=status, updated=db.now())
+    if note is not None:
+        cur["note"] = note
+    data[name] = cur
+    db.set_setting(conn, "approvals", json.dumps(data))
+    if status == "approved":   # re-check everything this approval could unlock
+        conn.execute("""DELETE FROM eligibility WHERE source = 'spapi' AND status != 'ungated' AND (
+                          lower(reason) LIKE ? OR asin IN (SELECT asin FROM products WHERE lower(brand) = lower(?)))""",
+                     (f"%{name.lower()}%", name))
+    return cur
+
 
 CAT_RE = re.compile(r"approval to list in the (.+?) category", re.I)
 STRONG_RANK, STRONG_PRICE = 50_000, 10.0
@@ -54,4 +79,8 @@ def targets(conn) -> dict:
                         "approval_url": url})
         return sorted(out, key=lambda g: (-g["strong"], -g["products"]))
 
-    return {"categories": summarize(cats), "brands": summarize(brands), "closed_to_applications": closed}
+    track = approvals(conn)
+    out = {"categories": summarize(cats), "brands": summarize(brands), "closed_to_applications": closed}
+    for g in out["categories"] + out["brands"]:
+        g["tracking"] = track.get(g["name"], {"status": "not_started"})
+    return out
