@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Share your orders · GhostSignal</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root { --navy: #142C51; --bg: #f9fafb; --card: #fff; --border: #e5e7eb; --text: #111827; --muted: #6b7280; --green: #15803d; --red: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 Inter, system-ui, sans-serif; }
+  header { background: var(--navy); color: #fff; padding: 28px 16px 64px; text-align: center; }
+  header img { width: 48px; height: 48px; border-radius: 12px; }
+  header h1 { margin: 12px 0 4px; font-size: 24px; }
+  header p { margin: 0 auto; max-width: 520px; opacity: .85; }
+  main { max-width: 640px; margin: -40px auto 40px; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin-bottom: 16px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  ol { margin: 0; padding-left: 20px; } li { margin-bottom: 6px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--border); background: #fff; color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .drop { border: 2px dashed var(--border); border-radius: 12px; padding: 26px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--navy); background: #eef2f7; }
+  .msg { margin-top: 12px; font-size: 14px; } .ok { color: var(--green); } .err { color: var(--red); }
+  .privacy { font-size: 13px; color: var(--muted); }
+  .bad { text-align: center; padding: 60px 16px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--green); margin-left: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/icon.svg" alt="">
+  <h1>Share your Amazon orders</h1>
+  <p id="hello">Help build a product database by sharing what you've bought. It takes about five minutes.</p>
+</header>
+<main id="main">
+  <div class="card">
+    <h2>1. Install the browser extension <span class="tag">Easiest</span></h2>
+    <p class="sub">Chrome, Edge, Brave or Arc on a computer.</p>
+    <ol>
+      <li><a class="btn primary" id="extLink" href="#">Download the extension</a></li>
+      <li>Unzip the file you downloaded.</li>
+      <li>Open <code>chrome://extensions</code>, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b>, and pick the unzipped folder.</li>
+      <li>Go to <a href="https://www.amazon.com/your-orders/orders" target="_blank" rel="noopener">your Amazon orders</a>, click the GhostSignal icon in the toolbar (the puzzle piece if it's hidden), then <b>Send my orders</b>.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>2. Or paste a script (no install)</h2>
+    <p class="sub">For anyone comfortable with the browser console.</p>
+    <ol>
+      <li><button class="btn" id="copyScript">Copy the script</button> <span id="copied" class="ok"></span></li>
+      <li>Open <a href="https://www.amazon.com/your-orders/orders" target="_blank" rel="noopener">your Amazon orders</a> and press <code>Cmd+Opt+J</code> (Mac) or <code>Ctrl+Shift+J</code> (Windows).</li>
+      <li>Paste and press Enter. Chrome may ask you to type <code>allow pasting</code> first. Leave the tab open until it says it's done.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>3. Or upload a file</h2>
+    <p class="sub">The file from the script above, or the order history CSV from Amazon's "Request Your Data".</p>
+    <label class="drop" id="drop">Drop the file here, or click to choose it<input type="file" id="file" accept=".json,.csv" multiple hidden></label>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <p class="privacy">What's shared: product name, ASIN, order date, quantity and price. Addresses, payment details and gift messages are never read or stored. Your orders are filed under the nickname the person who invited you chose, not your name or email. Ask them if you want your data removed.</p>
+</main>
+<script>
+const code = new URLSearchParams(location.search).get("c") || "";
+const $ = (s) => document.querySelector(s);
+(async () => {
+  const r = await fetch(`/api/invite/check?c=${encodeURIComponent(code)}`);
+  if (!r.ok) {
+    $("#main").innerHTML = `<div class="card bad"><h2>This invite link isn't valid</h2><p class="sub">Ask the person who sent it for a new one.</p></div>`;
+    return;
+  }
+  const { label } = await r.json();
+  $("#hello").textContent = `You're sharing as "${label}". Pick one of the three ways below; you only need one.`;
+  $("#extLink").href = `/extension.zip?c=${encodeURIComponent(code)}`;
+})();
+
+$("#copyScript").onclick = async () => {
+  const s = await (await fetch(`/tools/amazon_orders_scraper.js?c=${encodeURIComponent(code)}`)).text();
+  try { await navigator.clipboard.writeText(s); $("#copied").textContent = "Copied"; }
+  catch { $("#copied").textContent = "Couldn't copy. Use the extension or a file instead."; }
+};
+
+async function send(files) {
+  const msg = $("#msg");
+  for (const f of files) {
+    msg.className = "msg"; msg.textContent = `Sending ${f.name}…`;
+    try {
+      const r = await fetch(`/api/ingest/orders?token=${encodeURIComponent(code)}`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: await f.text() });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || r.statusText);
+      msg.className = "msg ok"; msg.textContent = `Thanks! ${out.added} order lines added from ${f.name}.`;
+    } catch (e) { msg.className = "msg err"; msg.textContent = `Couldn't send ${f.name}: ${e.message}`; }
+  }
+}
+$("#file").onchange = (e) => send(e.target.files);
+const drop = $("#drop");
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); send(e.dataTransfer.files); };
+</script>
+</body>
+</html>

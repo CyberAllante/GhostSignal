@@ -375,3 +375,34 @@ def test_subcategory_rank_not_used_as_overall_rank():
                             "classificationRanks": [{"title": "Laptop Sleeves", "rank": 1}]}]}
     product, rank, extra = spapi.parse_catalog_item(item)
     assert rank is None and extra == {"sub_rank": 1, "sub_category": "Laptop Sleeves"} and product["category"] == "Laptop Sleeves"
+
+
+def test_invite_flow(tmp_path, monkeypatch):
+    import io as _io, threading, urllib.request, urllib.error, http.server, zipfile as _zip
+    from ghostsignal import server, invites
+    monkeypatch.setenv("GHOSTSIGNAL_PASSWORD", "long-password-xyz")
+    monkeypatch.setenv("GHOSTSIGNAL_UPLOAD_TOKEN", "owner-token-123456789012345")
+    path = str(tmp_path / "i.db")
+    c = db.connect(path)
+    code = invites.create(c, "Jay!")
+    c.commit()
+    c.close()
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    get = lambda u: urllib.request.urlopen(base + u)
+    assert json.loads(get(f"/api/invite/check?c={code}").read())["label"] == "jay"
+    assert b"contribute" not in get("/contribute").read()[:0] and get("/contribute").status == 200
+    with pytest.raises(urllib.error.HTTPError):
+        get("/api/invite/check?c=nope")
+    z = _zip.ZipFile(_io.BytesIO(get(f"/extension.zip?c={code}").read()))
+    names = z.namelist()
+    assert "ghostsignal-exporter/manifest.json" in names and code in z.read("ghostsignal-exporter/config.js").decode()
+    body = json.dumps({"buyer": "someone-else", "orders": [{"asin": "B00NLVM6WK", "title": "Tuna", "order_id": "111-1", "quantity": 1}]}).encode()
+    r = json.loads(urllib.request.urlopen(urllib.request.Request(f"{base}/api/ingest/orders?token={code}", data=body)).read())
+    assert r["added"] == 1 and r["buyer"] == "jay"            # filed under the invite label, not what the file claims
+    with pytest.raises(urllib.error.HTTPError):
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/ingest/orders?token=bad", data=body))
+    with pytest.raises(urllib.error.HTTPError):               # an invite can't read anything
+        get(f"/api/products?token={code}")
+    srv.shutdown()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import hmac
+import io
+import zipfile
 import json
 import os
 import re
@@ -14,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, engine, importers, mcp, restrictions, ungate
+from . import db, engine, importers, invites, mcp, restrictions, ungate
 
 WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
@@ -181,6 +183,9 @@ def make_handler(db_path):
                 return None
             if self._public_asset(path):
                 return None
+            if path in ("/contribute", "/api/invite/check", "/extension.zip") or (
+                    path == "/tools/amazon_orders_scraper.js" and "c=" in self.path):
+                return self._invite_get(path)
             if self.path.startswith("/mcp"):
                 if not self._authed():
                     return None
@@ -195,11 +200,9 @@ def make_handler(db_path):
             if url.path == "/health":
                 return self._send(200, {"ok": True})
             if url.path == "/tools/amazon_orders_scraper.js":
-                script = (root / "tools" / "amazon_orders_scraper.js").read_text()
-                token = os.environ.get("GHOSTSIGNAL_UPLOAD_TOKEN", "")
-                if token:  # lets the exporter send orders straight here, no file shuffling
-                    script = script.replace("__GS_URL__", self._public_url()).replace("__GS_TOKEN__", token)
-                return self._send(200, script.encode(), "text/javascript; charset=utf-8")
+                # with the upload token filled in, the exporter sends orders straight here, no file shuffling
+                return self._send(200, self._script(os.environ.get("GHOSTSIGNAL_UPLOAD_TOKEN", ""), False),
+                                  "text/javascript; charset=utf-8")
             qs = {k: v[0] for k, v in parse_qs(url.query).items()}
             conn = db.connect(db_path)
             try:
@@ -209,6 +212,8 @@ def make_handler(db_path):
                     return self._send(200, {"running": is_running(), "last_run": db.get_setting(conn, "last_run")})
                 if url.path == "/api/blocked-brands":
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
+                if url.path == "/api/invites":
+                    return self._send(200, invites.listing(conn))
                 if url.path == "/api/ungate":
                     return self._send(200, ungate.targets(conn))
                 if url.path == "/api/outcomes":
@@ -282,19 +287,78 @@ def make_handler(db_path):
             finally:
                 conn.close()
 
+        def _invite_label(self):
+            code = parse_qs(urlparse(self.path).query).get("c", [""])[0]
+            conn = db.connect(db_path)
+            try:
+                return code, invites.label_for(conn, code)
+            finally:
+                conn.close()
+
+        def _script(self, token: str, invited: bool) -> bytes:
+            s = (root / "tools" / "amazon_orders_scraper.js").read_text()
+            if token:
+                s = s.replace("__GS_URL__", self._public_url()).replace("__GS_TOKEN__", token)
+            return s.replace("__GS_INVITED__", "1" if invited else "").encode()
+
+        def _invite_get(self, path):
+            """Public pages for invited friends. Everything here needs a valid invite code except the page shell."""
+            if path == "/contribute":
+                return self._send(200, (WEB / "contribute.html").read_bytes(), "text/html; charset=utf-8")
+            code, label = self._invite_label()
+            if not label:
+                return self._send(404, {"error": "invite not found"})
+            if path == "/api/invite/check":
+                return self._send(200, {"label": label})
+            if path == "/tools/amazon_orders_scraper.js":
+                return self._send(200, self._script(code, True), "text/javascript; charset=utf-8")
+            ext = root / "tools" / "extension"
+            manifest = {
+                "manifest_version": 3, "name": "GhostSignal Order Exporter", "version": "1.0",
+                "description": "Send your Amazon order history (products only) to the GhostSignal database you were invited to.",
+                "action": {"default_popup": "popup.html", "default_title": "GhostSignal"},
+                "permissions": ["activeTab", "scripting"],
+                "host_permissions": ["https://www.amazon.com/*", self._public_url() + "/*"],
+            }
+            config = "const GS_CONFIG = " + json.dumps({"server": self._public_url(), "invite": code, "label": label}) + ";\n"
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("ghostsignal-exporter/manifest.json", json.dumps(manifest, indent=2))
+                z.writestr("ghostsignal-exporter/config.js", config)
+                z.writestr("ghostsignal-exporter/scraper.js", self._script(code, True))
+                for name in ("popup.html", "popup.js"):
+                    z.write(ext / name, f"ghostsignal-exporter/{name}")
+            data = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="ghostsignal-exporter.zip"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
+
         def _ingest(self, url):
-            """Orders pushed straight from the exporter script. Token only allows adding orders."""
+            """Orders pushed by the exporter, the extension or the contribute page. The upload token or an
+            invite code only allows adding orders. Invite uploads are always filed under the invite's label."""
             token = os.environ.get("GHOSTSIGNAL_UPLOAD_TOKEN", "")
             given = parse_qs(url.query).get("token", [""])[0]
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n) or b"{}"
-            if not token or not hmac.compare_digest(given.encode(), token.encode()):
+            owner = bool(token) and hmac.compare_digest(given.encode(), token.encode())
+            conn = db.connect(db_path)
+            try:
+                invite_label = None if owner else invites.label_for(conn, given)
+            finally:
+                conn.close()
+            if not owner and not invite_label:
                 return self._json_cors(401, {"error": "bad token"})
             try:
-                data = json.loads(raw)
-                buyer = (data.get("buyer") or "me").strip() if isinstance(data, dict) else "me"
-                with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-                    f.write(raw.decode())
+                text = raw.decode("utf-8-sig", errors="replace")
+                is_json = text.lstrip()[:1] in ("{", "[")
+                data = json.loads(text) if is_json else None
+                buyer = invite_label or ((data.get("buyer") or "me").strip() if isinstance(data, dict) else "me")
+                with tempfile.NamedTemporaryFile("w", suffix=".json" if is_json else ".csv", delete=False, encoding="utf-8") as f:
+                    f.write(text)
                 conn = db.connect(db_path)
                 try:
                     r = importers.import_orders(conn, f.name, buyer)
@@ -339,6 +403,14 @@ def make_handler(db_path):
             conn = db.connect(db_path)
             try:
                 body = self._body()
+                if url.path == "/api/invites":
+                    code = invites.create(conn, body.get("label") or "")
+                    conn.commit()
+                    return self._send(200, {"code": code, "url": f"{self._public_url()}/contribute?c={code}"})
+                if url.path == "/api/invites/revoke":
+                    ok = invites.revoke(conn, body.get("code") or "")
+                    conn.commit()
+                    return self._send(200, {"ok": ok})
                 if url.path in ("/api/products/archive", "/api/products/restore"):
                     n = db.archive_products(conn, body.get("asins") or [], restore=url.path.endswith("restore"))
                     conn.commit()

@@ -374,6 +374,33 @@ def t_recheck_gated(conn, a):
     return f"Cleared {len(rows)} old gating answers. Run `run_now` and they will be re-checked against your account."
 
 
+def _base_url():
+    u = os.environ.get("GHOSTSIGNAL_PUBLIC_URL") or (("https://" + os.environ["RAILWAY_PUBLIC_DOMAIN"]) if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else "")
+    return u.rstrip("/") or "<your GhostSignal URL>"
+
+
+def t_invite_friend(conn, a):
+    from . import invites
+    code = invites.create(conn, a.get("label") or "")
+    conn.commit()
+    return (f"Invite link for {invites.label_for(conn, code)}: {_base_url()}/contribute?c={code}\n"
+            "They can install the extension, paste the script, or upload a file. Their orders are filed under that label. "
+            "The link can only add orders, never read anything. Revoke it any time with revoke_invite.")
+
+
+def t_list_invites(conn, a):
+    from . import invites
+    rows = invites.listing(conn)
+    return "\n".join(f"- {r['label']}: {r['orders']} order lines, created {r['created'][:10]}, code {r['code']}" for r in rows) or "No invites yet."
+
+
+def t_revoke_invite(conn, a):
+    from . import invites
+    ok = invites.revoke(conn, a.get("code") or "")
+    conn.commit()
+    return "Revoked. Their past orders stay." if ok else "No invite with that code."
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -416,6 +443,9 @@ TOOLS = {
     "outcomes": _tool(t_outcomes, "Predicted vs actual: how each verdict at purchase time performed once sold."),
     "ungate_targets": _tool(t_ungate_targets, "Which category/brand approvals would unlock the most strong products. Use when the user wants to decide what to get ungated.", {"limit": I}),
     "recheck_gated": _tool(t_recheck_gated, "After the user is approved for a brand/category, clear stale gating so it is re-checked (then call run_now).", {"brand": S, "category": S}),
+    "invite_friend": _tool(t_invite_friend, "Make a share link so a friend can add their Amazon order history (filed under the label you give).", {"label": S}, ["label"]),
+    "list_invites": _tool(t_list_invites, "Invite links and how many order lines each friend has sent."),
+    "revoke_invite": _tool(t_revoke_invite, "Turn off one friend's invite link.", {"code": S}, ["code"]),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

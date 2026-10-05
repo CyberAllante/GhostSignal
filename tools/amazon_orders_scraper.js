@@ -28,7 +28,11 @@
     // With these set, orders are sent straight to GhostSignal. Otherwise a file downloads.
     uploadUrl: "__GS_URL__",
     uploadToken: "__GS_TOKEN__",
+    invited: "__GS_INVITED__",   // "1" when this copy came from an invite link
   };
+  // The GhostSignal browser extension passes its settings in here instead.
+  const EXT = typeof window !== "undefined" && window.__GS_CFG__;
+  if (EXT) { CONFIG.uploadUrl = EXT.url; CONFIG.uploadToken = EXT.token; }
   const ORDER_CARD = ".order-card, .js-order-card, .a-box-group.order";
   const ASIN_RE = /(?:\/(?:dp|gp\/product|gp\/aw\/d|product)\/|[?&](?:asin|ASIN)=)([A-Z0-9]{10})/;
   const ORDER_ID_RE = /\b(\d{3}-\d{7}-\d{7}|D\d{2}-\d{7}-\d{7})\b/;
@@ -65,7 +69,9 @@
     return;
   }
 
-  const buyer = (prompt("Label for whose orders these are (e.g. me, gf, mom):", "me") || "me").trim();
+  // Invite links file your orders under the label the owner gave you, so don't ask.
+  const invited = Boolean(EXT) || CONFIG.invited === "1";
+  const buyer = invited ? "invited" : (prompt("Label for whose orders these are (e.g. me, gf, mom):", "me") || "me").trim();
 
   // Which years are available? Read the time filter dropdown, else fall back.
   let years = [...document.querySelectorAll('select[name="timeFilter"] option, #time-filter option')]

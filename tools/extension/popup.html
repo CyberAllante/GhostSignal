@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body { width: 300px; margin: 0; font: 14px/1.45 system-ui, sans-serif; color: #111827; }
+  .h { background: #142C51; color: #fff; padding: 14px 16px; font-weight: 600; }
+  .b { padding: 14px 16px; }
+  p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
+  button { width: 100%; padding: 10px; font-weight: 600; background: #142C51; color: #fff; border: 0; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: .5; }
+  #out { margin-top: 12px; font-size: 13px; }
+  .who { font-size: 12px; color: #6b7280; margin-top: 10px; }
+</style></head>
+<body>
+  <div class="h">GhostSignal order exporter</div>
+  <div class="b">
+    <p>Sends your Amazon order history (products only: name, ASIN, date, quantity, price) to the database you were invited to. No address or payment details.</p>
+    <button id="go">Send my orders</button>
+    <div id="out"></div>
+    <div class="who" id="who"></div>
+  </div>
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body></html>
