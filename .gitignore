@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+# Your database and raw order exports stay local — they contain personal data.
+data/*
+!data/.gitkeep
+*.sqlite
+*.db
+exports/
+*.egg-info/

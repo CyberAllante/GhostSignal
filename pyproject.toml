@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostsignal"
+version = "0.1.0"
+description = "Retail arbitrage intelligence: product database, opportunity scoring, buy signals."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+ai = ["anthropic"]
+dev = ["pytest"]
+
+[project.scripts]
+gs = "ghostsignal.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ghostsignal*"]
+
+[tool.setuptools.package-data]
+ghostsignal = ["web/*.html"]

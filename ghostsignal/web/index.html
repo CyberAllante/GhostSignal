@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostSignal</title>
+<style>
+  :root {
+    --bg: #07090b; --panel: #0d1114; --panel2: #121820; --line: #1c252e;
+    --text: #d6e2ea; --dim: #6f8290; --accent: #39ff9f; --accent-dim: #1b6b48;
+    --buy: #39ff9f; --research: #ffc53d; --pass: #ff5d5d; --blue: #4da3ff; --amz: #ff8a3d;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+  a { color: inherit; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(7,9,11,.92); backdrop-filter: blur(6px);
+           border-bottom: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: .2em; color: var(--accent); }
+  .brand small { color: var(--dim); letter-spacing: .1em; font-weight: 400; margin-left: 8px; }
+  .live { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .stats { font-family: var(--mono); color: var(--dim); font-size: 12px; display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+  .stats b { color: var(--text); }
+  .toolbar { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; align-items: center; }
+  input, select, button, textarea { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent-dim); }
+  button { cursor: pointer; font-family: var(--mono); font-size: 12px; letter-spacing: .05em; }
+  button:hover { border-color: var(--accent-dim); color: var(--accent); }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: #eafff4; }
+  #search { flex: 1; min-width: 180px; }
+  .chips button.on { color: var(--accent); border-color: var(--accent); }
+  main { padding: 0 16px 40px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .card.BUY { border-left: 3px solid var(--buy); }
+  .card.RESEARCH { border-left: 3px solid var(--research); }
+  .card.PASS { border-left: 3px solid var(--pass); opacity: .75; }
+  .top { display: grid; grid-template-columns: 72px 1fr auto; gap: 14px; padding: 14px; }
+  .img { width: 72px; height: 72px; border-radius: 8px; background: #fff center/contain no-repeat; display: grid; place-items: center; color: #999; font-size: 11px; }
+  .title { font-weight: 600; margin-bottom: 6px; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+  .tag { text-decoration: none; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; color: var(--dim); font-family: var(--mono); }
+  .tag.copy { cursor: pointer; }
+  .verdict { text-align: right; font-family: var(--mono); }
+  .verdict .v { font-size: 13px; font-weight: 700; letter-spacing: .15em; }
+  .verdict .s { font-size: 28px; font-weight: 700; line-height: 1; }
+  .BUY .v, .BUY .s { color: var(--buy); } .RESEARCH .v, .RESEARCH .s { color: var(--research); } .PASS .v, .PASS .s { color: var(--pass); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; padding: 0 14px 12px; }
+  .m label { display: block; color: var(--dim); font-size: 11px; }
+  .m span { font-family: var(--mono); font-size: 13px; }
+  .pos { color: var(--buy); } .neg { color: var(--pass); }
+  .amz { background: var(--amz); color: #111; border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 700; }
+  .why { padding: 0 14px 10px; font-size: 12px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .why .f { color: var(--research); }
+  .sources { display: flex; gap: 8px; padding: 10px 14px; background: var(--panel2); border-top: 1px solid var(--line); overflow-x: auto; }
+  .src { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; min-width: 130px; background: var(--panel); text-decoration: none; }
+  .src .r { color: var(--dim); } .src .p { font-family: var(--mono); font-size: 14px; }
+  .src.best { border-color: var(--accent-dim); }
+  .src.find { color: var(--dim); border-style: dashed; }
+  .src.find:hover { color: var(--accent); }
+  .actions { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  details.more { padding: 0 14px 12px; }
+  details.more summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+  .retail-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  form.inline { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  form.inline input { width: 110px; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; max-width: 560px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  dialog h3 { margin-top: 0; font-family: var(--mono); color: var(--accent); letter-spacing: .1em; }
+  dialog textarea { width: 100%; min-height: 120px; }
+  .row { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; align-items: center; }
+  .empty { text-align: center; color: var(--dim); padding: 60px 0; font-family: var(--mono); }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent-dim);
+           padding: 10px 16px; border-radius: 8px; font-family: var(--mono); font-size: 12px; display: none; z-index: 10; max-width: calc(100% - 32px); }
+  @media (max-width: 600px) {
+    .top { grid-template-columns: 56px 1fr; } .img { width: 56px; height: 56px; }
+    .verdict { grid-column: 1 / -1; text-align: left; display: flex; gap: 10px; align-items: baseline; }
+    .stats { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="live"></span>
+  <span class="brand">GHOSTSIGNAL<small>COMMERCE INTEL</small></span>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="toolbar">
+  <input id="search" placeholder="Search ASIN, title, brand…">
+  <div class="chips" id="chips">
+    <button data-v="" class="on">ALL</button><button data-v="BUY">BUY</button><button data-v="RESEARCH">RESEARCH</button><button data-v="PASS">PASS</button>
+  </div>
+  <button id="btnAdd">+ ASINS</button>
+  <button id="btnImport">IMPORT</button>
+  <button id="btnCopy">COPY ASINS</button>
+  <button id="btnScore" class="primary">RUN SCAN</button>
+</div>
+
+<main id="list"><div class="empty">ACQUIRING TARGETS…</div></main>
+
+<dialog id="dlgAdd">
+  <h3>ADD TARGETS</h3>
+  <p style="color:var(--dim)">Paste ASINs, Amazon URLs, or any text — every ASIN gets pulled out.</p>
+  <textarea id="addText" placeholder="B06W9N8X9H&#10;https://www.amazon.com/dp/B00NLVM6WK"></textarea>
+  <div class="row"><button class="primary" id="addGo">ADD</button><button onclick="this.closest('dialog').close()">CANCEL</button></div>
+</dialog>
+
+<dialog id="dlgImport">
+  <h3>IMPORT DATA</h3>
+  <div class="row">
+    <select id="impKind">
+      <option value="orders">Amazon order history (scraper JSON/CSV or privacy export)</option>
+      <option value="products">Product list CSV (Stealth Seller, Keepa, sheet)</option>
+    </select>
+  </div>
+  <div class="row" id="impBuyerRow"><label>Whose orders?</label><input id="impBuyer" value="me" placeholder="me, gf, mom…"></div>
+  <div class="row" id="impSourceRow" hidden><label>Source name</label><input id="impSource" value="stealthseller"></div>
+  <div class="row"><input type="file" id="impFile" accept=".csv,.json,.txt" multiple></div>
+  <div class="row"><button class="primary" id="impGo">IMPORT</button><button onclick="this.closest('dialog').close()">CANCEL</button></div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (x) => (typeof x === "number" ? "$" + x.toFixed(2) : "—");
+const pct = (x) => (typeof x === "number" ? Math.round(x * 100) + "%" : "—");
+const num = (x) => (typeof x === "number" ? (x >= 1000 ? (x / 1000).toFixed(x >= 10000 ? 0 : 1) + "K" : String(x)) : "—");
+let verdict = "", query = "", timer;
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = "none"), 3500);
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return (r.headers.get("content-type") || "").includes("json") ? r.json() : r.text();
+}
+function ago(iso) {
+  if (!iso) return "never";
+  const d = (Date.now() - new Date(iso)) / 864e5;
+  return d < 1 ? "today" : d < 30 ? Math.floor(d) + "d ago" : Math.floor(d / 30) + "mo ago";
+}
+
+async function loadStats() {
+  const s = await api("/api/stats");
+  $("#stats").innerHTML = `<span>TARGETS <b>${s.products}</b></span><span>NETWORK ORDERS <b>${s.orders}</b> / ${s.buyers} ppl</span>
+    <span>SELLERS <b>${s.sellers}</b></span><span>LAST SCAN <b>${ago(s.last_run)}</b></span>`;
+}
+
+function card(p) {
+  const e = p.economics, s = p.snapshot || {}, o = p.orders;
+  const profitCls = e.profit == null ? "" : e.profit > 0 ? "pos" : "neg";
+  const best = p.best_source;
+  const srcs = p.sources.map((x) => `
+    <a class="src ${best && best.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
+      <div class="r">${esc(x.retailer)}${x.pack_qty > 1 ? " ×" + x.pack_qty : ""}${x.in_stock === 0 ? " · OOS" : ""}</div>
+      <div class="p">${money(x.price)}</div>${x.promo ? `<div class="r">${esc(x.promo)}</div>` : ""}
+    </a>`).join("");
+  const suggested = (p.enrichment?.likely_retailers || ["walmart", "target", "costco", "samsclub"])
+    .filter((k) => p.links.retail[k] && !p.sources.some((x) => x.retailer === k)).slice(0, 4)
+    .map((k) => `<a class="src find" href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener"><div class="r">search</div><div>${esc(p.links.retail[k].name)} ↗</div></a>`).join("");
+  const allRetail = Object.entries(p.links.retail).map(([k, r]) =>
+    `<a class="tag" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name)}</a>`).join("");
+
+  return `<section class="card ${p.verdict}" data-asin="${p.asin}">
+    <div class="top">
+      <div class="img" style="${p.image_url ? `background-image:url('${esc(p.image_url)}')` : ""}">${p.image_url ? "" : "NO IMG"}</div>
+      <div>
+        <div class="title"><a href="${p.links.amazon}" target="_blank" rel="noopener" style="text-decoration:none">${esc(p.title || p.asin)}</a></div>
+        <div class="tags">
+          ${p.brand ? `<span class="tag">${esc(p.brand)}</span>` : ""}
+          ${p.category ? `<span class="tag">${esc(p.category)}</span>` : ""}
+          <span class="tag copy" title="copy" onclick="navigator.clipboard.writeText('${p.asin}');toast('Copied ${p.asin}')">${p.asin} ⧉</span>
+          ${p.origin ? `<span class="tag">via ${esc(p.origin)}</span>` : ""}
+          ${p.status !== "watch" ? `<span class="tag">${esc(p.status)}</span>` : ""}
+        </div>
+      </div>
+      <div class="verdict"><div class="v">${p.verdict}</div><div class="s">${p.score}</div><div style="color:var(--dim);font-size:11px">${ago(s.captured_at)}</div></div>
+    </div>
+    <div class="metrics">
+      <div class="m"><label>Buy Box</label><span>${money(s.buy_box)}</span> ${s.amazon_price ? '<span class="amz">AMZ</span>' : ""}</div>
+      <div class="m"><label>Max Cost</label><span>${money(e.max_cost)}</span></div>
+      <div class="m"><label>Cost</label><span>${money(e.cost)}</span></div>
+      <div class="m"><label>Profit</label><span class="${profitCls}">${money(e.profit)}</span></div>
+      <div class="m"><label>ROI</label><span class="${profitCls}">${pct(e.roi)}</span></div>
+      <div class="m"><label>Offers</label><span>${s.offer_count ?? "—"}</span></div>
+      <div class="m"><label>Sales Rank</label><span>${num(s.sales_rank)}</span></div>
+      <div class="m"><label>Monthly Sold</label><span>${num(s.monthly_sold)}</span></div>
+      <div class="m"><label>Avg 90d</label><span>${money(s.avg_price_90)}</span></div>
+      <div class="m"><label>Network</label><span>${o.orders ? `${o.orders}× / ${o.buyers}p` : "—"}</span></div>
+      ${e.ebay_profit != null ? `<div class="m"><label>eBay Profit</label><span>${money(e.ebay_profit)}</span></div>` : ""}
+    </div>
+    <div class="why">${p.reasons.map((r) => `<span>+ ${esc(r)}</span>`).join("")}${p.flags.map((f) => `<span class="f">! ${esc(f)}</span>`).join("")}
+      ${p.enrichment?.notes ? `<span>◆ ${esc(p.enrichment.notes)}</span>` : ""}</div>
+    <div class="sources">${srcs}${suggested}</div>
+    <details class="more">
+      <summary>log source · update data · all stores</summary>
+      <form class="inline" data-act="source">
+        <input name="retailer" placeholder="store" required list="retailers">
+        <input name="price" type="number" step="0.01" placeholder="price" required>
+        <input name="pack_qty" type="number" min="1" placeholder="units/listing">
+        <input name="promo" placeholder="promo">
+        <input name="url" placeholder="url" style="width:180px">
+        <button>LOG SOURCE</button>
+      </form>
+      <form class="inline" data-act="snapshot">
+        <input name="buy_box" type="number" step="0.01" placeholder="buy box">
+        <input name="sales_rank" type="number" placeholder="rank">
+        <input name="monthly_sold" type="number" placeholder="monthly sold">
+        <input name="offer_count" type="number" placeholder="offers">
+        <input name="avg_price_90" type="number" step="0.01" placeholder="90d avg">
+        <input name="ebay_sold_price" type="number" step="0.01" placeholder="eBay sold">
+        <button>SAVE DATA</button>
+      </form>
+      <div class="retail-grid">${allRetail}</div>
+    </details>
+    <div class="actions">
+      <a class="tag" href="${p.links.keepa}" target="_blank" rel="noopener">Keepa</a>
+      <a class="tag" href="${p.links.offers}" target="_blank" rel="noopener">Offers</a>
+      <a class="tag" href="${p.links.sellercentral}" target="_blank" rel="noopener">Eligibility</a>
+      <a class="tag" href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold</a>
+      <span style="flex:1"></span>
+      ${["buy", "research", "watch", "pass", "dead"].map((st) => `<button data-status="${st}">${st.toUpperCase()}</button>`).join("")}
+    </div>
+  </section>`;
+}
+
+async function load() {
+  const params = new URLSearchParams();
+  if (verdict) params.set("verdict", verdict);
+  if (query) params.set("q", query);
+  const rows = await api("/api/products?" + params);
+  $("#list").innerHTML = rows.length ? rows.map(card).join("") :
+    `<div class="empty">NO TARGETS.<br><br>Import your Amazon orders, paste ASINs, or run <code>gs demo</code>.</div>`;
+  loadStats();
+}
+
+$("#list").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = ev.target, asin = f.closest(".card").dataset.asin;
+  const data = Object.fromEntries([...new FormData(f)].filter(([, v]) => v !== ""));
+  for (const k of Object.keys(data)) if (!["retailer", "promo", "url"].includes(k)) data[k] = Number(data[k]);
+  try { await api(`/api/products/${asin}/${f.dataset.act}`, data); toast("Saved"); load(); } catch (e) { toast(e.message); }
+});
+$("#list").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-status]");
+  if (!b) return;
+  const asin = b.closest(".card").dataset.asin;
+  await api(`/api/products/${asin}/status`, { status: b.dataset.status });
+  toast(`${asin} → ${b.dataset.status}`); load();
+});
+$("#chips").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  [...$("#chips").children].forEach((x) => x.classList.toggle("on", x === b));
+  verdict = b.dataset.v; load();
+});
+$("#search").addEventListener("input", (ev) => { clearTimeout(timer); timer = setTimeout(() => { query = ev.target.value.trim(); load(); }, 250); });
+$("#btnAdd").onclick = () => $("#dlgAdd").showModal();
+$("#addGo").onclick = async () => {
+  const r = await api("/api/add", { text: $("#addText").value });
+  $("#dlgAdd").close(); $("#addText").value = ""; toast(`${r.added} ASINs added`); load();
+};
+$("#btnImport").onclick = () => $("#dlgImport").showModal();
+$("#impKind").onchange = (ev) => { $("#impBuyerRow").hidden = ev.target.value !== "orders"; $("#impSourceRow").hidden = ev.target.value === "orders"; };
+$("#impGo").onclick = async () => {
+  const kind = $("#impKind").value, files = [...$("#impFile").files];
+  if (!files.length) return toast("Pick a file");
+  const msgs = [];
+  for (const f of files) {
+    try {
+      const r = await api(`/api/import/${kind}`, { filename: f.name, content: await f.text(), buyer: $("#impBuyer").value, source: $("#impSource").value });
+      msgs.push(kind === "orders" ? `${f.name}: +${r.added} lines` : `${f.name}: ${r.products} products`);
+    } catch (e) { msgs.push(`${f.name}: ${e.message}`); }
+  }
+  $("#dlgImport").close(); toast(msgs.join(" · ")); load();
+};
+$("#btnCopy").onclick = async () => {
+  const t = await api("/api/asins");
+  await navigator.clipboard.writeText(t); toast(`${t.trim().split("\n").filter(Boolean).length} ASINs copied — paste into Stealth Seller / Keepa`);
+};
+$("#btnScore").onclick = async () => {
+  const r = await api("/api/score", {});
+  toast(r.changes.length ? r.changes.map((c) => `${c.kind}: ${c.asin}`).join(" · ") : "Scan complete — no new signals"); load();
+};
+
+const dl = document.createElement("datalist"); dl.id = "retailers";
+dl.innerHTML = ["walmart","target","costco","samsclub","homedepot","lowes","bestbuy","cvs","walgreens","traderjoes","wholefoods","kohls","dollartree"].map((r) => `<option value="${r}">`).join("");
+document.body.appendChild(dl);
+load();
+</script>
+</body>
+</html>

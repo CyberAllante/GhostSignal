@@ -1,0 +1,292 @@
+"""`gs` — GhostSignal command line.
+
+  gs demo                                  seed sample data so the dashboard has something to show
+  gs import-orders FILE --buyer me         Amazon order history (scraper JSON/CSV or privacy export)
+  gs import-products FILE --source NAME    any CSV with ASINs (Stealth Seller, Keepa, sheets)
+  gs add B0XXXXXXX ...  |  gs add -        add ASINs (or paste text/URLs on stdin)
+  gs source add ASIN walmart 8.50 [--pack 2 --promo B2G1 --url ... --oos]
+  gs snap ASIN --buy-box 21.80 --rank 21200 --monthly 100 --offers 14
+  gs refresh [--stale-days 3]              pull Keepa data (needs KEEPA_API_KEY)
+  gs seller add SELLER_ID | gs seller pull shadow storefronts via Keepa
+  gs enrich                                AI risk flags (needs ANTHROPIC_API_KEY)
+  gs score [--alert]                       score everything, alert on changes
+  gs run                                   refresh + score + alert (put this on cron)
+  gs top [-n 20] [--verdict BUY]           ranked opportunities
+  gs show ASIN | gs links ASIN             one product in detail / where to source it
+  gs status ASIN pass                      watch | buy | research | pass | dead
+  gs export asins [--verdict RESEARCH]     ASIN list to paste into Stealth Seller / Keepa
+  gs export csv [-o out.csv]               full table
+  gs serve [--port 8787]                   dashboard
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from datetime import datetime, timedelta, timezone
+
+from . import db, engine, importers
+from .sources import marketplace_links, retailer_links
+
+
+def _conn(args):
+    return db.connect(args.db)
+
+
+def _ranked(conn, verdict=None, limit=None):
+    out = []
+    for (asin,) in conn.execute("SELECT asin FROM products WHERE status NOT IN ('dead')"):
+        v = engine.product_view(conn, asin)
+        if verdict and v["verdict"] != verdict.upper():
+            continue
+        out.append(v)
+    out.sort(key=lambda v: (-{"BUY": 2, "RESEARCH": 1, "PASS": 0}[v["verdict"]], -v["score"]))
+    return out[:limit] if limit else out
+
+
+def _money(x):
+    if not isinstance(x, (int, float)):
+        return "—"
+    return f"-${-x:,.2f}" if x < 0 else f"${x:,.2f}"
+
+
+def cmd_import_orders(a):
+    conn = _conn(a)
+    for f in a.files:
+        r = importers.import_orders(conn, f, a.buyer)
+        print(f"{f}: {r['added']} order lines added, {r['skipped']} skipped (of {r['rows']})")
+
+
+def cmd_import_products(a):
+    conn = _conn(a)
+    for f in a.files:
+        r = importers.import_products(conn, f, a.source)
+        print(f"{f}: {r['products']} products, {r['snapshots']} snapshots, {r['sources']} sources")
+
+
+def cmd_add(a):
+    conn = _conn(a)
+    text = sys.stdin.read() if a.asins == ["-"] else " ".join(a.asins)
+    print(f"{importers.import_asin_text(conn, text, a.origin)} ASINs added/known")
+
+
+def cmd_source(a):
+    conn = _conn(a)
+    db.upsert_product(conn, a.asin)
+    db.add_source(conn, a.asin, a.retailer, a.price, pack_qty=a.pack, promo=a.promo, url=a.url,
+                  in_stock=0 if a.oos else (1 if a.in_stock else None), note=a.note)
+    conn.commit()
+    print(f"Logged {a.retailer} @ {_money(a.price)} for {a.asin.upper()}")
+
+
+def cmd_snap(a):
+    conn = _conn(a)
+    db.upsert_product(conn, a.asin, title=a.title, category=a.category)
+    db.add_snapshot(conn, a.asin, "manual", buy_box=a.buy_box, avg_price_90=a.avg, sales_rank=a.rank,
+                    monthly_sold=a.monthly, offer_count=a.offers, amazon_price=a.amazon,
+                    ebay_sold_price=a.ebay, fba_fee=a.fba_fee)
+    conn.commit()
+    print(f"Snapshot saved for {a.asin.upper()}")
+
+
+def _stale_asins(conn, days):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return [r[0] for r in conn.execute(
+        "SELECT asin FROM products WHERE status NOT IN ('dead','pass') AND (last_checked IS NULL OR last_checked < ?)",
+        (cutoff,))]
+
+
+def cmd_refresh(a):
+    from . import keepa
+    conn = _conn(a)
+    asins = _stale_asins(conn, a.stale_days)
+    if not asins:
+        print("Nothing stale.")
+        return
+    print(f"Refreshing {len(asins)} products from Keepa…")
+    print(keepa.refresh(conn, asins))
+
+
+def cmd_seller(a):
+    from . import keepa
+    conn = _conn(a)
+    if a.action == "add":
+        asins = keepa.seller_storefront(conn, a.seller_id)
+        print(f"Tracking {a.seller_id}: {len(asins)} storefront ASINs added")
+    elif a.action == "pull":
+        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers").fetchall():
+            print(f"{sid}: {len(keepa.seller_storefront(conn, sid))} ASINs")
+    else:
+        for r in conn.execute("SELECT * FROM tracked_sellers"):
+            print(dict(r))
+
+
+def cmd_enrich(a):
+    from . import enrich
+    print(f"Enriched {enrich.enrich(_conn(a), force=a.force)} products")
+
+
+def cmd_score(a):
+    changes = engine.run(_conn(a))
+    print(f"Scored. {len(changes)} change(s) worth a look.")
+    if a.alert:
+        engine.send_alerts(changes)
+    else:
+        for c in changes:
+            print(engine.format_alert(c), end="\n\n")
+
+
+def cmd_run(a):
+    import os
+    conn = _conn(a)
+    if os.environ.get("KEEPA_API_KEY"):
+        from . import keepa
+        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers").fetchall():
+            keepa.seller_storefront(conn, sid)
+        stale = _stale_asins(conn, a.stale_days)
+        if stale:
+            print("keepa:", keepa.refresh(conn, stale))
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        from . import enrich
+        print("enriched:", enrich.enrich(conn))
+    changes = engine.run(conn)
+    print(f"{len(changes)} alert(s)")
+    engine.send_alerts(changes)
+
+
+def cmd_top(a):
+    rows = _ranked(_conn(a), a.verdict, a.n)
+    print(f"{'VERDICT':9} {'SCR':>3}  {'ASIN':10}  {'SELL':>8} {'COST':>8} {'PROFIT':>7} {'ROI':>5}  TITLE")
+    for v in rows:
+        e = v["economics"]
+        roi = f"{e['roi']:.0%}" if e["roi"] is not None else "—"
+        print(f"{v['verdict']:9} {v['score']:>3}  {v['asin']:10}  {_money(e['sale_price']):>8} "
+              f"{_money(e['cost']):>8} {_money(e['profit']):>7} {roi:>5}  {(v['title'] or '')[:60]}")
+
+
+def cmd_show(a):
+    v = engine.product_view(_conn(a), a.asin.upper())
+    e = v["economics"]
+    print(f"{v['title']}\n{v['asin']} · {v['brand'] or ''} · {v['category'] or ''}")
+    print(f"\n{v['verdict']}  {v['score']}/100")
+    print(f"Sell {_money(e['sale_price'])}  Fees {_money((e['referral_fee'] or 0) + (e['fba_fee'] or 0))}  "
+          f"Max cost {_money(e['max_cost'])}  Cost {_money(e['cost'])}  Profit {_money(e['profit'])}")
+    for r in v["reasons"]:
+        print(f"  + {r}")
+    for f in v["flags"]:
+        print(f"  ! {f}")
+    if v["sources"]:
+        print("\nSources:")
+        for s in v["sources"]:
+            print(f"  {s['retailer']:12} {_money(s['price'])} x{s['pack_qty']} {s['promo'] or ''} {s['url'] or ''}")
+    print(f"\nKeepa: {v['links']['keepa']}")
+
+
+def cmd_links(a):
+    conn = _conn(a)
+    p = conn.execute("SELECT * FROM products WHERE asin = ?", (a.asin.upper(),)).fetchone()
+    if p is None:
+        sys.exit(f"Unknown ASIN {a.asin}")
+    for k, url in marketplace_links(p["asin"], p["title"]).items():
+        print(f"{k:14} {url}")
+    for k, r in retailer_links(p["title"], p["upc"]).items():
+        print(f"{r['name']:14} {r['url']}")
+
+
+def cmd_status(a):
+    conn = _conn(a)
+    conn.execute("UPDATE products SET status = ? WHERE asin = ?", (a.status, a.asin.upper()))
+    conn.commit()
+    print(f"{a.asin.upper()} → {a.status}")
+
+
+def cmd_export(a):
+    conn = _conn(a)
+    out = open(a.output, "w", newline="") if a.output else sys.stdout
+    if a.what == "asins":
+        rows = _ranked(conn, a.verdict) if a.verdict else [
+            {"asin": r[0]} for r in conn.execute("SELECT asin FROM products WHERE status NOT IN ('dead','pass')")]
+        out.write("\n".join(r["asin"] for r in rows) + "\n")
+    else:
+        w = csv.writer(out)
+        w.writerow(["asin", "title", "brand", "category", "verdict", "score", "sale_price", "max_cost", "cost",
+                    "profit", "roi", "best_source", "monthly_sold", "sales_rank", "offers", "network_orders", "keepa"])
+        for v in _ranked(conn, a.verdict):
+            e, s = v["economics"], v["snapshot"] or {}
+            w.writerow([v["asin"], v["title"], v["brand"], v["category"], v["verdict"], v["score"], e["sale_price"],
+                        e["max_cost"], e["cost"], e["profit"], e["roi"],
+                        (v["best_source"] or {}).get("retailer"), s.get("monthly_sold"), s.get("sales_rank"),
+                        s.get("offer_count"), v["orders"]["orders"], v["links"]["keepa"]])
+    if a.output:
+        out.close()
+        print(f"Wrote {a.output}")
+
+
+def cmd_serve(a):
+    from .server import serve
+    serve(a.db, a.host, a.port)
+
+
+def cmd_demo(a):
+    from .demo import seed
+    conn = _conn(a)
+    seed(conn)
+    engine.run(conn)
+    print("Demo data loaded. Try: gs top   or   gs serve")
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="gs", description="GhostSignal — find the signal, make the move.",
+                                formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    p.add_argument("--db", default=None, help="SQLite path (default data/ghostsignal.db or $GHOSTSIGNAL_DB)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("import-orders"); s.add_argument("files", nargs="+"); s.add_argument("--buyer", required=True)
+    s.set_defaults(fn=cmd_import_orders)
+    s = sub.add_parser("import-products"); s.add_argument("files", nargs="+"); s.add_argument("--source", default="csv")
+    s.set_defaults(fn=cmd_import_products)
+    s = sub.add_parser("add"); s.add_argument("asins", nargs="+"); s.add_argument("--origin", default="manual")
+    s.set_defaults(fn=cmd_add)
+
+    s = sub.add_parser("source"); s.add_argument("action", choices=["add"]); s.add_argument("asin")
+    s.add_argument("retailer"); s.add_argument("price", type=float)
+    s.add_argument("--pack", type=int, default=1, help="retail units per Amazon unit")
+    s.add_argument("--promo", default=""); s.add_argument("--url", default=""); s.add_argument("--note", default="")
+    s.add_argument("--oos", action="store_true"); s.add_argument("--in-stock", action="store_true")
+    s.set_defaults(fn=cmd_source)
+
+    s = sub.add_parser("snap"); s.add_argument("asin")
+    for flag in ("--buy-box", "--avg", "--amazon", "--ebay", "--fba-fee"):
+        s.add_argument(flag, type=float)
+    for flag in ("--rank", "--monthly", "--offers"):
+        s.add_argument(flag, type=int)
+    s.add_argument("--title"); s.add_argument("--category")
+    s.set_defaults(fn=cmd_snap)
+
+    s = sub.add_parser("refresh"); s.add_argument("--stale-days", type=float, default=3); s.set_defaults(fn=cmd_refresh)
+    s = sub.add_parser("seller"); s.add_argument("action", choices=["add", "pull", "list"])
+    s.add_argument("seller_id", nargs="?"); s.set_defaults(fn=cmd_seller)
+    s = sub.add_parser("enrich"); s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_enrich)
+    s = sub.add_parser("score"); s.add_argument("--alert", action="store_true"); s.set_defaults(fn=cmd_score)
+    s = sub.add_parser("run"); s.add_argument("--stale-days", type=float, default=3); s.set_defaults(fn=cmd_run)
+    s = sub.add_parser("top"); s.add_argument("-n", type=int, default=25); s.add_argument("--verdict")
+    s.set_defaults(fn=cmd_top)
+    s = sub.add_parser("show"); s.add_argument("asin"); s.set_defaults(fn=cmd_show)
+    s = sub.add_parser("links"); s.add_argument("asin"); s.set_defaults(fn=cmd_links)
+    s = sub.add_parser("status"); s.add_argument("asin")
+    s.add_argument("status", choices=["watch", "buy", "research", "pass", "dead"]); s.set_defaults(fn=cmd_status)
+    s = sub.add_parser("export"); s.add_argument("what", choices=["asins", "csv"]); s.add_argument("--verdict")
+    s.add_argument("-o", "--output"); s.set_defaults(fn=cmd_export)
+    s = sub.add_parser("serve"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787)
+    s.set_defaults(fn=cmd_serve)
+    s = sub.add_parser("demo"); s.set_defaults(fn=cmd_demo)
+
+    a = p.parse_args(argv)
+    if a.cmd == "seller" and a.action == "add" and not a.seller_id:
+        p.error("seller add needs a SELLER_ID")
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

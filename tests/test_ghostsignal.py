@@ -1,0 +1,106 @@
+import json
+
+import pytest
+
+from ghostsignal import db, engine, importers, keepa
+from ghostsignal.scoring import economics, score_product
+
+
+@pytest.fixture
+def conn():
+    return db.connect(":memory:")
+
+
+PRIVACY_CSV = '''"Website","Order ID","Order Date","Currency","Unit Price","Quantity","ASIN","Order Status","Shipping Address","Product Name"
+"Amazon.com","111-1234567-1234567","2025-03-01T18:22:11Z","USD","12.99","2","B00NLVM6WK","Closed","123 Secret St","Wild Planet Tuna"
+"Amazon.com","111-1234567-7654321","2025-04-02T10:00:00Z","USD","5.00","1","B06W9N8X9H","Cancelled","123 Secret St","TJ Bagel"
+'''
+
+
+def test_import_privacy_export_drops_cancelled_and_addresses(conn, tmp_path):
+    f = tmp_path / "Retail.OrderHistory.1.csv"
+    f.write_text(PRIVACY_CSV)
+    r = importers.import_orders(conn, f, "me")
+    assert r["added"] == 1
+    row = dict(conn.execute("SELECT * FROM orders").fetchone())
+    assert row["asin"] == "B00NLVM6WK" and row["quantity"] == 2 and row["unit_price"] == 12.99
+    assert row["order_date"] == "2025-03-01"
+    assert "Secret" not in json.dumps(row)
+    # re-import is idempotent
+    assert importers.import_orders(conn, f, "me")["added"] == 0
+
+
+def test_import_scraper_json(conn, tmp_path):
+    f = tmp_path / "amazon-orders-gf.json"
+    f.write_text(json.dumps({"buyer": "gf", "orders": [
+        {"order_id": "112-0000000-0000001", "order_date": "March 4, 2025", "asin": "B00F0FC3OC",
+         "title": "Pocky", "quantity": 1},
+    ]}))
+    assert importers.import_orders(conn, f, "gf")["added"] == 1
+    assert conn.execute("SELECT order_date FROM orders").fetchone()[0] == "2025-03-04"
+    assert db.order_stats(conn, "B00F0FC3OC")["buyers"] == 1
+
+
+def test_import_stealthseller_style_csv(conn, tmp_path):
+    f = tmp_path / "ss.csv"
+    f.write_text("ASIN,Title,Buy Box,Sales Rank,Monthly Sold,Offers,Avg Price,Source URL,Cost\n"
+                 "B00F0FC3OC,Pocky,$30.89,21.2K,<50,14,$29.40,https://www.costco.com/pocky.html,$10.99\n")
+    r = importers.import_products(conn, f, "stealthseller")
+    assert r == {"rows": 1, "products": 1, "snapshots": 1, "sources": 1}
+    s = db.latest_snapshot(conn, "B00F0FC3OC")
+    assert (s["buy_box"], s["sales_rank"], s["monthly_sold"], s["offer_count"]) == (30.89, 21200, 25, 14)
+    assert db.latest_sources(conn, "B00F0FC3OC")[0]["retailer"] == "costco"
+
+
+def test_asin_text_extraction(conn):
+    n = importers.import_asin_text(conn, "see https://www.amazon.com/dp/B06W9N8X9H/ref=x and b00nlvm6wk, B06W9N8X9H")
+    assert n == 2
+
+
+def test_economics_grocery_referral_and_max_cost():
+    e = economics(12.0, 3.0, "Grocery & Gourmet Food", fba_fee=3.0)
+    assert e.referral_fee == 0.96          # 8% at or under $15
+    assert e.net_payout == round(12 - 0.96 - 3.0 - 0.60, 2)
+    assert e.max_cost == round(e.net_payout / 1.3, 2)
+    assert e.profit == round(e.net_payout - 3.0, 2)
+
+
+def test_verdicts():
+    snap = {"buy_box": 30.0, "avg_price_90": 29.0, "monthly_sold": 500, "offer_count": 5, "fba_fee": 4.0}
+    good = score_product({}, snap, [{"retailer": "costco", "price": 10.0, "pack_qty": 1, "in_stock": 1}],
+                         {"orders": 3, "buyers": 3, "repeat_buyers": 1})
+    assert good.verdict == "BUY" and good.score >= 70
+    no_cost = score_product({}, snap, [], {"orders": 0})
+    assert no_cost.verdict == "RESEARCH" and any("buy under" in f for f in no_cost.flags)
+    loser = score_product({}, snap, [{"retailer": "x", "price": 28.0, "pack_qty": 1}], {"orders": 0})
+    assert loser.verdict == "PASS"
+    oos = score_product({}, snap, [{"retailer": "x", "price": 1.0, "pack_qty": 1, "in_stock": 0}], {"orders": 0})
+    assert oos.economics.cost is None
+
+
+def test_engine_alerts_on_upgrade(conn):
+    db.upsert_product(conn, "B00F0FC3OC", title="Pocky")
+    db.add_snapshot(conn, "B00F0FC3OC", "t", buy_box=30.0, avg_price_90=29.0, monthly_sold=500,
+                    offer_count=5, fba_fee=4.0)
+    db.add_source(conn, "B00F0FC3OC", "walmart", 29.0)
+    assert engine.run(conn) == []                      # PASS, nothing to say
+    db.add_source(conn, "B00F0FC3OC", "costco", 10.0, in_stock=1)
+    changes = engine.run(conn)
+    assert len(changes) == 1 and changes[0]["kind"] == "PASS → BUY"
+    assert "BUY" in engine.format_alert(changes[0])
+
+
+def test_keepa_parse():
+    cur = [-1] * 20
+    cur[keepa.AMAZON], cur[keepa.SALES_RANK], cur[keepa.COUNT_NEW], cur[keepa.BUY_BOX] = 2399, 2567, 18, 2399
+    avg = [-1] * 20
+    avg[keepa.BUY_BOX] = 1613
+    prod, snap = keepa.parse_product({
+        "asin": "B00NLVM6WK", "title": "Tuna", "brand": "Wild Planet", "imagesCSV": "abc.jpg,def.jpg",
+        "categoryTree": [{"name": "Grocery & Gourmet Food"}], "upcList": ["123"], "monthlySold": 2000,
+        "fbaFees": {"pickAndPackFee": 410}, "referralFeePercentage": 15,
+        "stats": {"current": cur, "avg90": avg, "buyBoxPrice": 2399},
+    })
+    assert prod["image_url"].endswith("abc.jpg") and prod["category"].startswith("Grocery")
+    assert snap == {"buy_box": 23.99, "amazon_price": 23.99, "avg_price_90": 16.13, "sales_rank": 2567,
+                    "monthly_sold": 2000, "offer_count": 18, "referral_pct": 0.15, "fba_fee": 4.10}
