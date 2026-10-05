@@ -183,6 +183,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                      ("new_count", "INTEGER DEFAULT 0")):
         if col not in have:
             conn.execute(f"ALTER TABLE tracked_sellers ADD COLUMN {col} {ddl}")
+    if "order_total" not in {r["name"] for r in conn.execute("PRAGMA table_info(orders)")}:
+        conn.execute("ALTER TABLE orders ADD COLUMN order_total REAL")   # whole-order total, repeated on each line
     inv = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)")}
     for col, ddl in (("pred_verdict", "TEXT"), ("pred_score", "INTEGER"), ("pred_profit", "REAL")):
         if col not in inv:
@@ -426,3 +428,12 @@ def outcomes(conn: sqlite3.Connection) -> dict:
         d["win_rate"] = round(d["wins"] / d["lots"], 2) if d["lots"] else None
     return {"sold_lots": len(sold), "by_verdict": by,
             "total_profit": round(sum(r["profit"] for r in sold), 2)}
+
+
+def spend_by_buyer(conn: sqlite3.Connection) -> dict:
+    """Total Amazon spend per buyer, counting each order once (its total is repeated on every line)."""
+    out = {}
+    for r in conn.execute("""SELECT buyer, COUNT(*) AS orders, ROUND(SUM(t), 2) AS spend, SUM(t IS NULL) AS unknown FROM (
+                               SELECT buyer, order_id, MAX(order_total) AS t FROM orders GROUP BY buyer, order_id) GROUP BY buyer"""):
+        out[r["buyer"]] = {"orders": r["orders"], "spend": r["spend"] or 0.0, "orders_without_total": r["unknown"]}
+    return out

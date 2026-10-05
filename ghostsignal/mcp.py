@@ -409,6 +409,16 @@ def t_set_approval(conn, a):
     return f"{a['name']}: {r['status']}" + (f" ({r.get('note')})" if r.get("note") else "") + "." + tail
 
 
+def t_spend(conn, a):
+    rows = db.spend_by_buyer(conn)
+    if not rows:
+        return "No orders imported yet."
+    lines = [f"- {b}: {_money(v['spend'])} across {v['orders']} orders"
+             + (f" ({v['orders_without_total']} orders had no total, so the real figure is higher)" if v["orders_without_total"] else "")
+             for b, v in rows.items()]
+    return "Amazon spend from imported order history:\n" + "\n".join(lines) + f"\nTotal: {_money(sum(v['spend'] for v in rows.values()))}"
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -456,6 +466,7 @@ TOOLS = {
     "revoke_invite": _tool(t_revoke_invite, "Turn off one friend's invite link.", {"code": S}, ["code"]),
     "set_approval": _tool(t_set_approval, "Track an ungating application for a category or brand (name exactly as in ungate_targets).",
                           {"name": S, "status": {"type": "string", "enum": ["not_started", "applying", "approved", "rejected"]}, "note": S}, ["name", "status"]),
+    "spend": _tool(t_spend, "How much each imported buyer has spent on Amazon (from order totals)."),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

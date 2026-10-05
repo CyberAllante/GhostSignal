@@ -262,6 +262,7 @@ def make_handler(db_path):
                         "buyers": c("SELECT COUNT(DISTINCT buyer) FROM orders"),
                         "sellers": c("SELECT COUNT(*) FROM tracked_sellers"),
                         "last_run": db.get_setting(conn, "last_run"),
+                        "spend": db.spend_by_buyer(conn),
                         "inventory_units": c("SELECT COALESCE(SUM(qty - sold_qty), 0) FROM inventory WHERE status != 'sold'"),
                         "inventory_cost": c("SELECT COALESCE(SUM((qty - sold_qty) * unit_cost), 0) FROM inventory WHERE status != 'sold'"),
                         "realized_profit": c("SELECT COALESCE(SUM((sold_price - COALESCE(unit_cost, 0)) * sold_qty), 0) FROM inventory WHERE status = 'sold'"),

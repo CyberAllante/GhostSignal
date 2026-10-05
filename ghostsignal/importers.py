@@ -115,6 +115,10 @@ def import_orders(conn, path: str | Path, buyer: str) -> dict:
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (buyer, str(order_id), date(pick(r, "order_date", "Order Date")), asin, title, unit, qty, path.name),
         )
+        total = money(pick(r, "order_total"))
+        if total is not None:    # fill in on re-imports too, so older uploads gain their totals
+            conn.execute("UPDATE orders SET order_total = ? WHERE buyer = ? AND order_id = ? AND asin = ? AND order_total IS NULL",
+                         (total, buyer, str(order_id), asin))
         if cur.rowcount:
             added += 1
             db.upsert_product(conn, asin, title=title, origin="orders",

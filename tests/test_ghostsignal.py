@@ -424,3 +424,18 @@ def test_list_view_is_slim(conn):
     db.upsert_product(conn, "B000000012", title="Thing", brand="Acme")
     v = engine.list_view(conn, "B000000012")
     assert set(v) >= {"asin", "verdict", "gated", "economics", "snapshot", "orders"} and "history" not in v and "links" not in v
+
+
+def test_order_totals_and_spend(conn, tmp_path):
+    f = tmp_path / "o.json"
+    rows = [{"order_id": "111-1", "asin": "B00NLVM6WK", "title": "A", "order_total": "20.00", "order_date": "March 1, 2025"},
+            {"order_id": "111-1", "asin": "B06W9N8X9H", "title": "B", "order_total": "20.00", "order_date": "March 1, 2025"},
+            {"order_id": "111-2", "asin": "B00NLVM6WK", "title": "A", "order_date": "April 1, 2025"}]
+    f.write_text(json.dumps({"orders": rows}))
+    importers.import_orders(conn, f, "me")
+    s = db.spend_by_buyer(conn)["me"]
+    assert s == {"orders": 2, "spend": 20.0, "orders_without_total": 1}     # order counted once; missing total flagged
+    rows[2]["order_total"] = "5.50"
+    f.write_text(json.dumps({"orders": rows}))
+    importers.import_orders(conn, f, "me")                                  # re-import fills in the older row
+    assert db.spend_by_buyer(conn)["me"]["spend"] == 25.5
