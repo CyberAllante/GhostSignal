@@ -709,7 +709,11 @@ async function copyAsins() {
   const t = await api("/api/asins");
   await navigator.clipboard.writeText(t); toast(`${t.trim().split("\n").filter(Boolean).length} ASINs copied. Paste into Stealth Seller or Keepa.`);
 }
-async function scan() { const r = await api("/api/score", {}); toast(r.changes.length ? `${r.changes.length} product(s) moved up` : "Scan done. Nothing new."); route(); }
+async function scan() {
+  const r = await api("/api/refresh", {});
+  toast(r.started ? "Pulling fresh data from Amazon. This takes a few minutes; the page updates as it goes." : "A data pull is already running.");
+  const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); route(); } }, 10000);
+}
 async function refreshSellers(b) {
   b.disabled = true;
   try { toast((await api("/api/sellers/refresh", {})).message); pageSellers(); } catch (e) { toast(e.message); b.disabled = false; }

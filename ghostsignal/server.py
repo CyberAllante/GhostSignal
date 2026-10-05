@@ -205,6 +205,8 @@ def make_handler(db_path):
             try:
                 if url.path in ("/", "/index.html"):
                     return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
+                if url.path == "/api/refresh/status":
+                    return self._send(200, {"running": is_running(), "last_run": db.get_setting(conn, "last_run")})
                 if url.path == "/api/blocked-brands":
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
                 if url.path == "/api/outcomes":
@@ -459,6 +461,11 @@ def make_handler(db_path):
                 if url.path == "/api/demo/clear":
                     from .demo import clear_demo
                     return self._send(200, {"removed": clear_demo(conn)})
+                if url.path == "/api/refresh":      # pull fresh data from every connected source, in the background
+                    if is_running():
+                        return self._send(200, {"started": False, "running": True})
+                    refresh_in_background(db_path)
+                    return self._send(200, {"started": True, "running": True})
                 if url.path == "/api/score":
                     changes = engine.run(conn)
                     return self._send(200, {"changes": [
