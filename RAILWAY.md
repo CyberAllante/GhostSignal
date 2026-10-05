@@ -20,6 +20,7 @@ Service → **Settings → Volumes → New Volume → Mount path: `/data`**.
 |---|---|---|
 | `GHOSTSIGNAL_PASSWORD` | a long password you pick | **Yes.** The app refuses to start without it, because your order data is on a public URL. |
 | `GHOSTSIGNAL_AUTO_RUN_HOURS` | `24` (daily) or `168` (weekly) | Recommended. Refreshes prices and scores on its own. |
+| `GHOSTSIGNAL_UPLOAD_TOKEN` | any random string | Recommended. Lets the order exporter send orders straight to your app (see MCP.md). |
 | `KEEPA_API_KEY` | from keepa.com | When you have it |
 | `SERPAPI_KEY` | from serpapi.com | When you have it |
 | `SPAPI_CLIENT_ID`, `SPAPI_CLIENT_SECRET`, `SPAPI_REFRESH_TOKEN`, `SPAPI_SELLER_ID` | from Seller Central | When you have them |
@@ -37,6 +38,10 @@ Service → **Settings → Networking → Generate Domain**. Open the link. Your
 1. Dashboard → **Import orders**. Follow the two steps (copy the exporter script, run it on amazon.com for each person, upload the files).
 2. Add the keys above as you get them. After each import, and on the schedule, it looks up prices, fees and gated status for whatever keys are connected.
 3. If you see sample data, click **Clear sample data**. (Railway starts empty, so you only see samples if you loaded them.)
+
+## Connect Claude
+
+Once it's running, follow **MCP.md** so Claude can run it for you.
 
 ## Notes
 

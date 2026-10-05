@@ -96,11 +96,20 @@ def cmd_snap(a):
     print(f"Snapshot saved for {a.asin.upper()}")
 
 
-def _stale_asins(conn, days):
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    return [r[0] for r in conn.execute(
-        "SELECT asin FROM products WHERE status NOT IN ('dead','pass') AND (last_checked IS NULL OR last_checked < ?)",
-        (cutoff,))]
+def _stale_asins(conn, days=None, limit=300):
+    """Products due for a Keepa refresh, most valuable first, capped to protect your Keepa tokens.
+    Cadence by verdict (see engine.refresh_days); `days` forces one cadence for everything."""
+    rows = conn.execute(
+        """SELECT p.asin, p.last_checked, s.verdict, s.score FROM products p
+           LEFT JOIN signals s ON s.id = (SELECT MAX(id) FROM signals WHERE asin = p.asin)
+           WHERE p.status NOT IN ('dead')""").fetchall()
+    due = []
+    for r in rows:
+        every = days if days is not None else engine.refresh_days(r["verdict"], r["score"])
+        age = 1e9 if not r["last_checked"] else engine._days_since(r["last_checked"])
+        if age >= every:
+            due.append((0 if not r["last_checked"] else 1, -(r["score"] or 0), r["asin"]))
+    return [a for _, _, a in sorted(due)[:limit]]
 
 
 def cmd_refresh(a):
@@ -151,7 +160,7 @@ def cmd_score(a):
             print(engine.format_alert(c), end="\n\n")
 
 
-def run_pipeline(conn, stale_days: float = 3, max_prices: int = 50):
+def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
     """Everything `gs run` does. Each step only runs if its key is connected."""
     import os
     if os.environ.get("KEEPA_API_KEY"):
@@ -373,12 +382,12 @@ def main(argv=None):
     s.add_argument("--title"); s.add_argument("--category")
     s.set_defaults(fn=cmd_snap)
 
-    s = sub.add_parser("refresh"); s.add_argument("--stale-days", type=float, default=3); s.set_defaults(fn=cmd_refresh)
+    s = sub.add_parser("refresh"); s.add_argument("--stale-days", type=float, default=None); s.set_defaults(fn=cmd_refresh)
     s = sub.add_parser("seller"); s.add_argument("action", choices=["add", "pull", "list"])
     s.add_argument("seller_id", nargs="?"); s.set_defaults(fn=cmd_seller)
     s = sub.add_parser("enrich"); s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_enrich)
     s = sub.add_parser("score"); s.add_argument("--alert", action="store_true"); s.set_defaults(fn=cmd_score)
-    s = sub.add_parser("run"); s.add_argument("--stale-days", type=float, default=3)
+    s = sub.add_parser("run"); s.add_argument("--stale-days", type=float, default=None)
     s.add_argument("--max-prices", type=int, default=50, help="cap store-price lookups per run (SerpAPI cost)")
     s.set_defaults(fn=cmd_run)
     s = sub.add_parser("prices"); s.add_argument("asins", nargs="*"); s.add_argument("--max", type=int, default=25)

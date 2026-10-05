@@ -24,6 +24,10 @@
     maxYears: 6,          // how far back to go
     delayMs: 1500,        // pause between page loads
     pageSize: 10,         // Amazon shows 10 orders per page
+    // Filled in automatically when you copy this script from your GhostSignal dashboard.
+    // With these set, orders are sent straight to GhostSignal. Otherwise a file downloads.
+    uploadUrl: "__GS_URL__",
+    uploadToken: "__GS_TOKEN__",
   };
   const ORDER_CARD = ".order-card, .js-order-card, .a-box-group.order";
   const ASIN_RE = /\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/;
@@ -115,6 +119,30 @@
     return;
   }
 
+  const buyerFile = buyer.replace(/[^a-z0-9_-]+/gi, "-");
+  const payload = JSON.stringify({ exported_at: new Date().toISOString(), buyer, orders: rows });
+  const asins = [...new Set(rows.map((r) => r.asin))];
+
+  // 1) Straight to GhostSignal (if this copy of the script knows where it lives)
+  if (CONFIG.uploadUrl && !CONFIG.uploadUrl.startsWith("__")) {
+    try {
+      const res = await fetch(`${CONFIG.uploadUrl}/api/ingest/orders?token=${encodeURIComponent(CONFIG.uploadToken)}`, {
+        method: "POST", headers: { "Content-Type": "text/plain" }, body: payload,
+      });
+      if (res.ok) {
+        const out = await res.json();
+        console.log("GhostSignal: uploaded", out);
+        alert(`GhostSignal: sent ${out.added} new order lines (${asins.length} products) for "${buyer}". You're done.`);
+        return;
+      }
+      console.warn("GhostSignal: upload refused", res.status);
+    } catch (e) {
+      // Amazon's page security can block sending to another site; fall through to the file download.
+      console.warn("GhostSignal: could not upload, downloading a file instead.", e);
+    }
+  }
+
+  // 2) Fallback: download files you can import by hand
   const download = (name, body, type) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([body], { type }));
@@ -127,10 +155,9 @@
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
 
-  download(`amazon-orders-${buyer}.json`, JSON.stringify({ exported_at: new Date().toISOString(), buyer, orders: rows }, null, 2), "application/json");
-  download(`amazon-orders-${buyer}.csv`, csv, "text/csv");
+  download(`amazon-orders-${buyerFile}.json`, payload, "application/json");
+  download(`amazon-orders-${buyerFile}.csv`, csv, "text/csv");
 
-  const asins = [...new Set(rows.map((r) => r.asin))];
   try { await navigator.clipboard.writeText(asins.join("\n")); } catch (_) {}
   console.log(`GhostSignal: done. ${rows.length} items, ${asins.length} unique ASINs (ASIN list copied to clipboard).`);
   alert(`GhostSignal: exported ${rows.length} items / ${asins.length} unique ASINs.\nFiles downloaded; ASIN list copied to clipboard.`);

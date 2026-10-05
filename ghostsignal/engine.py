@@ -31,30 +31,93 @@ def evaluate(conn, asin: str, cfg: Config | None = None):
     return product, snap, sources, orders, sig
 
 
-def run(conn, cfg: Config | None = None, statuses=("watch", "buy", "research")) -> list[dict]:
-    """Score all live products. Returns the list of *changes* worth alerting on."""
-    changes = []
-    q = f"SELECT asin FROM products WHERE status IN ({','.join('?' * len(statuses))})"
-    for (asin,) in conn.execute(q, statuses).fetchall():
-        product, _, _, _, sig = evaluate(conn, asin, cfg)
-        prev = db.last_signal(conn, asin)
+def _days_since(iso: str) -> float:
+    from datetime import datetime, timezone
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds() / 86400
+
+
+def pass_streak_days(conn, asin: str) -> float:
+    """How long this product has continuously been a PASS (0 if it isn't one)."""
+    start = None
+    for r in conn.execute("SELECT verdict, created_at FROM signals WHERE asin = ? ORDER BY id DESC", (asin,)):
+        if r["verdict"] != "PASS":
+            break
+        start = r["created_at"]
+    return _days_since(start) if start else 0.0
+
+
+def refresh_days(verdict: str | None, score: int | None) -> float:
+    """How often a product deserves a fresh look. Good ones daily, dead ones rarely,
+    but never never: a product that's a PASS today can be a BUY in six months."""
+    if verdict is None:
+        return 0
+    if verdict == "BUY":
+        return 1
+    if verdict == "RESEARCH":
+        return 3
+    return 30 if (score or 0) < 25 else 14
+
+
+def record_signal(conn, asin: str, cfg: Config | None = None, force: bool = False):
+    """Score one product, store a history row only when something changed (or weekly),
+    and return the alert-worthy change, if any."""
+    product, _, _, _, sig = evaluate(conn, asin, cfg)
+    prev = db.last_signal(conn, asin)
+    e = sig.economics
+    # measure how long it was a PASS *before* we write today's row
+    dormant = pass_streak_days(conn, asin) if prev is not None and prev["verdict"] == "PASS" else 0
+    unchanged = (prev is not None and prev["verdict"] == sig.verdict and prev["score"] == sig.score
+                 and prev["profit"] == e.profit and _days_since(prev["created_at"]) < 7)
+    if not unchanged or force:
         conn.execute(
             """INSERT INTO signals (asin, created_at, score, verdict, profit, roi, best_source, reasons)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (asin, db.now(), sig.score, sig.verdict, sig.economics.profit, sig.economics.roi,
-             sig.best_source["retailer"] if sig.best_source else None,
-             json.dumps(sig.reasons + sig.flags)),
-        )
-        if prev is None:
-            if sig.verdict == "BUY":
-                changes.append({"asin": asin, "title": product["title"], "kind": "NEW BUY", "signal": sig})
-        elif RANK[sig.verdict] > RANK[prev["verdict"]]:
-            changes.append({"asin": asin, "title": product["title"],
-                            "kind": f"{prev['verdict']} → {sig.verdict}", "signal": sig})
-        elif sig.verdict == "BUY" and sig.score - prev["score"] >= 10:
-            changes.append({"asin": asin, "title": product["title"], "kind": "BUY ↑", "signal": sig})
+            (asin, db.now(), sig.score, sig.verdict, e.profit, e.roi,
+             sig.best_source["retailer"] if sig.best_source else None, json.dumps(sig.reasons + sig.flags)))
+    change = None
+    base = {"asin": asin, "title": product["title"], "signal": sig}
+    if prev is None:
+        if sig.verdict == "BUY":
+            change = {**base, "kind": "NEW BUY"}
+    elif RANK[sig.verdict] > RANK[prev["verdict"]]:
+        kind = f"{prev['verdict']} → {sig.verdict}"
+        if dormant >= 30:
+            kind = f"REVIVED after {int(dormant)}d → {sig.verdict}"
+        change = {**base, "kind": kind}
+    elif sig.verdict == "BUY" and sig.score - prev["score"] >= 10:
+        change = {**base, "kind": "BUY ↑"}
+    return change
+
+
+def run(conn, cfg: Config | None = None, statuses=("watch", "buy", "research")) -> list[dict]:
+    """Score all live products. Returns the changes worth alerting on."""
+    changes = []
+    q = f"SELECT asin FROM products WHERE status IN ({','.join('?' * len(statuses))})"
+    for (asin,) in conn.execute(q, statuses).fetchall():
+        c = record_signal(conn, asin, cfg)
+        if c:
+            changes.append(c)
+    db.set_setting(conn, "last_run", db.now())
     conn.commit()
     return changes
+
+
+def recent_changes(conn, limit: int = 12, days: float | None = None) -> list[dict]:
+    """Products whose latest verdict is better than the one before it."""
+    rows = conn.execute(
+        """SELECT s.asin, s.verdict, s.score, s.created_at, p.title FROM signals s JOIN products p ON p.asin = s.asin
+           WHERE p.status != 'dead' ORDER BY s.asin, s.id DESC""").fetchall()
+    by = {}
+    for r in rows:
+        by.setdefault(r["asin"], []).append(r)
+    out = []
+    for asin, sigs in by.items():
+        if len(sigs) >= 2 and RANK[sigs[0]["verdict"]] > RANK[sigs[1]["verdict"]]:
+            if days is not None and _days_since(sigs[0]["created_at"]) > days:
+                continue
+            out.append({"asin": asin, "title": sigs[0]["title"], "from": sigs[1]["verdict"], "to": sigs[0]["verdict"],
+                        "score": sigs[0]["score"], "at": sigs[0]["created_at"]})
+    return sorted(out, key=lambda c: c["at"], reverse=True)[:limit]
 
 
 def format_alert(c: dict) -> str:

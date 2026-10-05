@@ -8,7 +8,7 @@ GhostSignal is a retail arbitrage intelligence system. Instead of hunting for on
 DATA  →  DETECT  →  VERIFY  →  SCORE  →  ALERT
 ```
 
-**Hosting on Railway (not your Mac):** see [RAILWAY.md](RAILWAY.md).
+**Hosting on Railway (not your Mac):** see [RAILWAY.md](RAILWAY.md). **Let Claude run it for you (MCP):** see [MCP.md](MCP.md).
 
 ## One master database, three ways to sell
 

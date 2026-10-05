@@ -203,3 +203,54 @@ def test_server_requires_password(tmp_path, monkeypatch):
     req = urllib.request.Request(base + "/api/stats", headers={"Authorization": "Basic " + base64.b64encode(b"u:pw").decode()})
     assert urllib.request.urlopen(req).status == 200
     httpd.shutdown()
+
+
+def test_dormant_pass_revives_and_refresh_cadence(conn):
+    from datetime import datetime, timedelta, timezone
+    asin = "B00F0FC3OC"
+    db.upsert_product(conn, asin, title="Pocky")
+    db.add_snapshot(conn, asin, "t", buy_box=30.0, avg_price_90=29.0, monthly_sold=500, offer_count=5, fba_fee=4.0)
+    db.add_source(conn, asin, "walmart", 29.0)
+    assert engine.record_signal(conn, asin) is None                       # PASS today
+    old = (datetime.now(timezone.utc) - timedelta(days=200)).replace(microsecond=0).isoformat()
+    conn.execute("UPDATE signals SET created_at = ?", (old,))             # ...and it's been a PASS for 200 days
+    db.add_source(conn, asin, "costco", 10.0, in_stock=1)                 # a cheaper source appears
+    change = engine.record_signal(conn, asin)
+    assert change and change["kind"].startswith("REVIVED after 200d")
+    # history rows are only written when something changed, so the table doesn't balloon
+    n = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    engine.record_signal(conn, asin)
+    assert conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == n
+    assert engine.refresh_days("BUY", 80) < engine.refresh_days("RESEARCH", 50) < engine.refresh_days("PASS", 40) < engine.refresh_days("PASS", 10)
+
+
+def test_mcp_tools(tmp_path):
+    from ghostsignal import mcp
+    from ghostsignal.demo import seed
+    path = str(tmp_path / "m.db")
+    c = db.connect(path)
+    seed(c)
+    engine.run(c)
+    c.close()
+
+    def call(name, **args):
+        r = mcp.handle(path, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})["result"]
+        return r["content"][0]["text"], r["isError"]
+
+    init = mcp.handle(path, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]
+    assert init["serverInfo"]["name"] == "ghostsignal" and "analyst" in init["instructions"]
+    assert mcp.handle(path, {"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    assert len(mcp.handle(path, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]) >= 15
+    text, bad = call("picks")
+    assert not bad and text.splitlines()[0].startswith("B00F0FC3OC | BUY")
+    text, _ = call("log_price", asin="B00NLVM6WK", retailer="walmart", price=9.0)       # rescored immediately
+    assert "RESEARCH" in text or "BUY" in text
+    text, _ = call("set_gated", asin="B00F0FC3OC", status="blocked")
+    assert "CAN'T SELL" in text
+    call("note", asin="B00F0FC3OC", text="Costco box is 10-ct")
+    assert "Costco box is 10-ct" in call("product", asin="B00F0FC3OC")[0]
+    assert call("set_gated", asin="B00F0FC3OC", status="nope")[1] is True            # bad input is an error, not a crash
+    assert "error" in mcp.handle(path, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nope"}})
+    text, _ = call("import_orders", filename="amazon-orders-mom.json", content=json.dumps(
+        {"orders": [{"order_id": "1", "asin": "B0NEWPROD1", "title": "New thing", "order_date": "2026-09-01", "quantity": 1}]}))
+    assert "Imported 1 order lines for 'mom'" in text

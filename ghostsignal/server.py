@@ -14,29 +14,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, engine, importers
+from . import db, engine, importers, mcp
 
 WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
 ORDER = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 INV_PATH = re.compile(r"^/api/inventory/(\d+)$")
 SELLER_PATH = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/(status|remove)$")
-
-
-def recent_changes(conn, limit=12):
-    """Products whose latest verdict is better than the one before it."""
-    out = []
-    rows = conn.execute(
-        """SELECT s.asin, s.verdict, s.score, s.created_at, p.title FROM signals s JOIN products p ON p.asin = s.asin
-           WHERE p.status != 'dead' ORDER BY s.asin, s.id DESC""").fetchall()
-    last = {}
-    for r in rows:
-        last.setdefault(r["asin"], []).append(r)
-    for asin, sigs in last.items():
-        if len(sigs) >= 2 and ORDER[sigs[0]["verdict"]] > ORDER[sigs[1]["verdict"]]:
-            out.append({"asin": asin, "title": sigs[0]["title"], "from": sigs[1]["verdict"],
-                        "to": sigs[0]["verdict"], "score": sigs[0]["score"], "at": sigs[0]["created_at"]})
-    return sorted(out, key=lambda c: c["at"], reverse=True)[:limit]
 
 
 def sellers(conn):
@@ -72,6 +56,10 @@ def refresh_in_background(db_path):
     threading.Thread(target=work, daemon=True).start()
 
 
+def is_running() -> bool:
+    return _run_lock.locked()
+
+
 def make_handler(db_path):
     password = os.environ.get("GHOSTSIGNAL_PASSWORD", "")
     root = Path(__file__).resolve().parent.parent
@@ -82,6 +70,8 @@ def make_handler(db_path):
             if not password or self.path == "/health":
                 return True
             header = self.headers.get("Authorization", "")
+            if header.startswith("Bearer ") and hmac.compare_digest(header[7:].encode(), password.encode()):
+                return True
             if header.startswith("Basic "):
                 try:
                     given = base64.b64decode(header[6:]).decode().partition(":")[2]
@@ -111,15 +101,44 @@ def make_handler(db_path):
             n = int(self.headers.get("Content-Length") or 0)
             return json.loads(self.rfile.read(n) or b"{}")
 
+        def _cors(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _public_url(self) -> str:
+            base = os.environ.get("GHOSTSIGNAL_PUBLIC_URL")
+            if base:
+                return base.rstrip("/")
+            proto = self.headers.get("X-Forwarded-Proto") or "http"
+            return f"{proto}://{self.headers.get('Host', 'localhost')}"
+
         def do_GET(self):
+            if self.path.startswith("/mcp"):
+                if not self._authed():
+                    return None
+                self.send_response(405)  # no server-initiated stream; POST only
+                self.send_header("Allow", "POST")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
             if not self._authed():
                 return None
             url = urlparse(self.path)
             if url.path == "/health":
                 return self._send(200, {"ok": True})
             if url.path == "/tools/amazon_orders_scraper.js":
-                return self._send(200, (root / "tools" / "amazon_orders_scraper.js").read_bytes(),
-                                  "text/javascript; charset=utf-8")
+                script = (root / "tools" / "amazon_orders_scraper.js").read_text()
+                token = os.environ.get("GHOSTSIGNAL_UPLOAD_TOKEN", "")
+                if token:  # lets the exporter send orders straight here, no file shuffling
+                    script = script.replace("__GS_URL__", self._public_url()).replace("__GS_TOKEN__", token)
+                return self._send(200, script.encode(), "text/javascript; charset=utf-8")
             qs = {k: v[0] for k, v in parse_qs(url.query).items()}
             conn = db.connect(db_path)
             try:
@@ -145,7 +164,7 @@ def make_handler(db_path):
                         "orders": c("SELECT COUNT(*) FROM orders"),
                         "buyers": c("SELECT COUNT(DISTINCT buyer) FROM orders"),
                         "sellers": c("SELECT COUNT(*) FROM tracked_sellers"),
-                        "last_run": c("SELECT MAX(created_at) FROM signals"),
+                        "last_run": db.get_setting(conn, "last_run"),
                         "inventory_units": c("SELECT COALESCE(SUM(qty - sold_qty), 0) FROM inventory WHERE status != 'sold'"),
                         "inventory_cost": c("SELECT COALESCE(SUM((qty - sold_qty) * unit_cost), 0) FROM inventory WHERE status != 'sold'"),
                         "realized_profit": c("SELECT COALESCE(SUM((sold_price - COALESCE(unit_cost, 0)) * sold_qty), 0) FROM inventory WHERE status = 'sold'"),
@@ -161,7 +180,7 @@ def make_handler(db_path):
                 if url.path == "/api/inventory":
                     return self._send(200, db.inventory_rows(conn))
                 if url.path == "/api/changes":
-                    return self._send(200, recent_changes(conn))
+                    return self._send(200, engine.recent_changes(conn))
                 if url.path == "/api/export.csv":
                     import csv
                     import io
@@ -193,10 +212,58 @@ def make_handler(db_path):
             finally:
                 conn.close()
 
+        def _ingest(self, url):
+            """Orders pushed straight from the exporter script. Token only allows adding orders."""
+            token = os.environ.get("GHOSTSIGNAL_UPLOAD_TOKEN", "")
+            given = parse_qs(url.query).get("token", [""])[0]
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) or b"{}"
+            if not token or not hmac.compare_digest(given.encode(), token.encode()):
+                return self._json_cors(401, {"error": "bad token"})
+            try:
+                data = json.loads(raw)
+                buyer = (data.get("buyer") or "me").strip() if isinstance(data, dict) else "me"
+                with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+                    f.write(raw.decode())
+                conn = db.connect(db_path)
+                try:
+                    r = importers.import_orders(conn, f.name, buyer)
+                finally:
+                    conn.close()
+                    Path(f.name).unlink(missing_ok=True)
+                refresh_in_background(db_path)
+                return self._json_cors(200, {**r, "buyer": buyer})
+            except (ValueError, KeyError) as e:
+                return self._json_cors(400, {"error": str(e)})
+
+        def _json_cors(self, code, obj):
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self._cors()
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_POST(self):
+            url = urlparse(self.path)
+            if url.path == "/api/ingest/orders":
+                return self._ingest(url)
             if not self._authed():
                 return None
-            url = urlparse(self.path)
+            if url.path == "/mcp":
+                try:
+                    msg = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                except json.JSONDecodeError:
+                    return self._send(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+                batch = isinstance(msg, list)
+                replies = [r for r in (mcp.handle(db_path, m) for m in (msg if batch else [msg])) if r is not None]
+                if not replies:  # only notifications
+                    self.send_response(202)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
+                return self._send(200, replies if batch else replies[0])
             conn = db.connect(db_path)
             try:
                 body = self._body()
