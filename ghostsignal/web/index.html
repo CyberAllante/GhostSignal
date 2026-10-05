@@ -364,7 +364,7 @@ async function pageDashboard() {
   const count = (g) => live.filter((p) => p.gated === g).length;
   const withData = live.filter((p) => p.economics.sale_price).length;
   const rankOf = (p) => p.snapshot?.sales_rank || 1e12;
-  const sellNow = live.filter((p) => p.gated === "ungated").sort((a, b) => rankOf(a) - rankOf(b)).slice(0, 8);
+  const sellNow = live.filter((p) => p.gated === "ungated").sort((a, b) => (b.priority ?? b.score) - (a.priority ?? a.score)).slice(0, 8);
   const approvals = [...ung.categories.map((g) => ({ ...g, kind: "Category" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "Brand" }))]
     .sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
   const row = (p) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}
@@ -402,7 +402,7 @@ async function pageDashboard() {
 }
 
 const COLS = [
-  ["title", "Product", (p) => (p.title || "").toLowerCase()], ["score", "Signal", (p) => p.score], ["gated", "Can sell", (p) => p.gated],
+  ["title", "Product", (p) => (p.title || "").toLowerCase()], ["score", "Signal", (p) => p.priority ?? p.score], ["gated", "Can sell", (p) => p.gated],
   ["sell", "Sell", (p) => p.economics.sale_price], ["cost", "Cost", (p) => p.economics.cost], ["max", "Max cost", (p) => p.economics.max_cost],
   ["profit", "Profit", (p) => p.economics.profit], ["roi", "ROI", (p) => p.economics.roi], ["sold", "Sales/mo", (p) => p.snapshot?.monthly_sold],
   ["rank", "Rank", (p) => p.snapshot?.sales_rank], ["offers", "Sellers", (p) => p.snapshot?.offer_count], ["net", "Network", (p) => p.orders.orders || null],

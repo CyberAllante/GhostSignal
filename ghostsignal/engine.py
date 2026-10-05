@@ -181,6 +181,18 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
     }
 
 
+_GATE_RANK = {"ungated": 3, "unknown": 2, "approval": 1, "blocked": 0}
+_VERDICT_RANK = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
+
+
+def priority(view: dict) -> int:
+    """Sort key for 'what to look at first': can-sell beats needs-approval beats blocked, then verdict, then score.
+    Junk (Amazon brands, gift cards, fee lines) sinks to the bottom."""
+    if view.get("restricted"):
+        return -1
+    return _GATE_RANK.get(view.get("gated"), 2) * 1000 + _VERDICT_RANK.get(view.get("verdict"), 0) * 100 + (view.get("score") or 0)
+
+
 def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
     """The slim version of product_view for lists and tables (about a tenth of the size)."""
     product, snap, _sources, orders, sig = evaluate(conn, asin, cfg)
@@ -188,7 +200,7 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
     s = dict(snap) if snap else None
     enr = _enrichment(conn, asin)
     el = db.get_eligibility(conn, asin)
-    return {
+    view = {
         "asin": asin, "title": product["title"], "brand": product["brand"], "category": product["category"],
         "image_url": product["image_url"], "status": product["status"],
         "verdict": sig.verdict, "score": sig.score, "gated": sig.gated, "restricted": sig.restricted,
@@ -197,6 +209,8 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "snapshot": {k: s.get(k) for k in ("sales_rank", "monthly_sold", "offer_count", "captured_at", "amazon_price")} if s else None,
         "orders": {"orders": orders.get("orders") or 0},
         "best_source": {"retailer": sig.best_source["retailer"]} if sig.best_source else None,
-        "enrichment": {"gating_risk": enr.get("gating_risk")} if enr else None,
+        "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores")} if enr else None,
         "eligibility": {"approval_url": el.get("approval_url"), "reason": el.get("reason"), "status": el.get("status")} if el else None,
     }
+    view["priority"] = priority(view)
+    return view

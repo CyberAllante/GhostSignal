@@ -254,7 +254,7 @@ def make_handler(db_path):
                     if qs.get("q"):
                         q = qs["q"].lower()
                         rows = [r for r in rows if q in f"{r['asin']} {r['title']} {r['brand']}".lower()]
-                    rows.sort(key=lambda r: (-ORDER[r["verdict"]], -r["score"]))
+                    rows.sort(key=lambda r: -(r.get("priority") if r.get("priority") is not None else engine.priority(r)))
                     return self._send(200, rows)
                 m = ASIN_PATH.match(url.path)
                 if m and not m.group(2):

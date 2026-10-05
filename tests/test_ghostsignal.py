@@ -439,3 +439,23 @@ def test_order_totals_and_spend(conn, tmp_path):
     f.write_text(json.dumps({"orders": rows}))
     importers.import_orders(conn, f, "me")                                  # re-import fills in the older row
     assert db.spend_by_buyer(conn)["me"]["spend"] == 25.5
+
+
+def test_amazon_only_brand_is_pass_and_sinks(conn):
+    db.upsert_product(conn, "B000000021", title="Trendy Ribbed Knit Top", brand="PRETTYGARDEN")
+    db.upsert_product(conn, "B000000022", title="Peet's Dark Roast 32oz", brand="Peet's")
+    for a in ("B000000021", "B000000022"):
+        db.add_snapshot(conn, a, "manual", buy_box=30.0, sales_rank=500, monthly_sold=900, offer_count=3)
+        db.set_eligibility(conn, a, "ungated", "spapi")
+    conn.execute("INSERT INTO enrichment VALUES ('B000000021', 'x', ?)", (json.dumps({"sold_in_stores": False, "likely_retailers": []}),))
+    conn.execute("INSERT INTO enrichment VALUES ('B000000022', 'x', ?)", (json.dumps({"sold_in_stores": True, "likely_retailers": ["costco"]}),))
+    bad, good = engine.list_view(conn, "B000000021"), engine.list_view(conn, "B000000022")
+    assert bad["verdict"] == "PASS" and good["verdict"] != "PASS"
+    assert good["priority"] > bad["priority"]
+
+
+def test_priority_orders_sellable_before_blocked():
+    hi = engine.priority({"gated": "ungated", "verdict": "RESEARCH", "score": 20})
+    mid = engine.priority({"gated": "approval", "verdict": "RESEARCH", "score": 90})
+    lo = engine.priority({"gated": "blocked", "verdict": "PASS", "score": 0})
+    assert hi > mid > lo and engine.priority({"restricted": "x", "gated": "ungated", "verdict": "BUY", "score": 99}) == -1

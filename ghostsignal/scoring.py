@@ -224,6 +224,10 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     if e.get("ip_complaint_risk") == "high":
         flags.append("Brand known for IP complaints")
         penalty += 15
+    amazon_only = e.get("sold_in_stores") is False and best is None
+    if amazon_only:
+        flags.append("No store sells this (Amazon-only brand) — nothing to buy for resale")
+        penalty += 25
     if e.get("replenishable"):
         reasons.append("Replenishable / repeat-purchase item")
 
@@ -240,6 +244,8 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     else:
         verdict = "PASS"
 
+    if amazon_only and verdict != "PASS":
+        verdict = "PASS"
     # Gating overrides: never tell you to BUY something you can't list.
     if gated == "blocked" and econ.best_channel is None:
         verdict = "PASS"
