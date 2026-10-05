@@ -60,6 +60,10 @@ def is_running() -> bool:
     return _run_lock.locked()
 
 
+_pin_fails = {"n": 0, "locked_until": 0.0}
+PIN_MAX_FAILS, PIN_LOCK_SECONDS = 5, 3600
+
+
 def make_handler(db_path):
     password = os.environ.get("GHOSTSIGNAL_PASSWORD", "")
     root = Path(__file__).resolve().parent.parent
@@ -108,15 +112,27 @@ def make_handler(db_path):
             return True
 
         def _login(self):
+            """Accepts the long password, or a short PIN (GHOSTSIGNAL_PIN). PIN guesses are limited:
+            5 wrong tries disable the PIN for an hour (the long password keeps working)."""
             n = int(self.headers.get("Content-Length") or 0)
-            given = parse_qs(self.rfile.read(n).decode()).get("password", [""])[0]
-            if password and hmac.compare_digest(given.encode(), password.encode()):
-                self.send_response(302)
+            given = parse_qs(self.rfile.read(n).decode()).get("password", [""])[0].strip()
+            pin = os.environ.get("GHOSTSIGNAL_PIN", "")
+            ok = bool(password) and hmac.compare_digest(given.encode(), password.encode())
+            if not ok and pin and time.time() >= _pin_fails["locked_until"]:
+                if hmac.compare_digest(given.encode(), pin.encode()):
+                    ok = True
+                    _pin_fails["n"] = 0
+                elif given.isdigit():     # only count PIN-shaped guesses against the lock
+                    _pin_fails["n"] += 1
+                    if _pin_fails["n"] >= PIN_MAX_FAILS:
+                        _pin_fails.update(n=0, locked_until=time.time() + PIN_LOCK_SECONDS)
+            self.send_response(302)
+            if ok:
                 self.send_header("Location", "/")
                 self.send_header("Set-Cookie", f"gs_session={self._session()}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax")
             else:
-                self.send_response(302)
-                self.send_header("Location", "/login?error=1")
+                locked = bool(pin) and time.time() < _pin_fails["locked_until"]
+                self.send_header("Location", "/login?error=" + ("locked" if locked else "1"))
             self.send_header("Content-Length", "0")
             self.end_headers()
 

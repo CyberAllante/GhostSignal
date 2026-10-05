@@ -26,10 +26,10 @@
   <img src="/icon.svg" alt="">
   <h1>GhostSignal</h1>
   <p>Find the signal. Make the move.</p>
-  <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
-  <div class="err" id="err">Wrong password. Try again.</div>
+  <input type="password" name="password" placeholder="PIN or password" autocomplete="current-password" autofocus required>
+  <div class="err" id="err">Wrong PIN or password.</div>
   <button type="submit">Sign in</button>
 </form>
-<script>if (location.search.includes("error")) document.getElementById("err").style.display = "block";</script>
+<script>if (location.search.includes("error")) { const e = document.getElementById("err"); e.style.display = "block"; if (location.search.includes("locked")) e.textContent = "Too many wrong PINs. PIN is off for an hour. Use your full password."; }</script>
 </body>
 </html>

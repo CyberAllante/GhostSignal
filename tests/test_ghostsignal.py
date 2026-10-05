@@ -310,3 +310,33 @@ def test_spapi_market_refresh(conn, monkeypatch):
     assert s["buy_box"] == 24.5 and s["sales_rank"] == 842 and s["offer_count"] == 7
     assert s["fba_offers"] == 3 and s["fbm_offers"] == 4 and s["amazon_price"] == 25.99
     assert s["monthly_sold"] == 400 and s["avg_price_90"] == 23.0     # Keepa-only fields carried forward
+
+
+def test_pin_login_and_lockout(tmp_path, monkeypatch):
+    import threading, urllib.request, urllib.error, urllib.parse, http.server
+    from ghostsignal import server
+    monkeypatch.setenv("GHOSTSIGNAL_PASSWORD", "long-password-xyz")
+    monkeypatch.setenv("GHOSTSIGNAL_PIN", "4321")
+    server._pin_fails.update(n=0, locked_until=0.0)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(str(tmp_path / "t.db")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    op = urllib.request.build_opener(NoRedirect)
+
+    def login(pw):
+        req = urllib.request.Request(base + "/login", data=urllib.parse.urlencode({"password": pw}).encode())
+        try:
+            op.open(req)
+        except urllib.error.HTTPError as e:
+            return e.headers.get("Location"), e.headers.get("Set-Cookie")
+    assert login("4321")[0] == "/"
+    assert login("long-password-xyz")[0] == "/"
+    for _ in range(5):
+        assert login("0000")[1] is None
+    assert login("4321")[0].startswith("/login?error")          # PIN locked after 5 bad PINs
+    assert login("long-password-xyz")[0] == "/"                  # real password still works
+    srv.shutdown()
