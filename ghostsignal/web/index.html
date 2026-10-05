@@ -148,6 +148,9 @@
   .dh h2 { font-size: 16px; margin: 4px 48px 8px 0; line-height: 1.35; }
   .db { padding: 8px 24px 32px; }
   .sec { margin-top: 20px; }
+  details.edit { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
+  details.edit summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; }
+  details.edit summary::before { content: "▸ "; } details.edit[open] summary::before { content: "▾ "; }
   .sec h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
   .kv { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .kv div { padding: 10px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
@@ -570,12 +573,19 @@ function drawer(p) {
   const ch = e.channels || {}, notAmazon = p.asin.startsWith("GS");
   const chanCard = (k) => { const c = ch[k]; return `<div class="${e.best_channel === k ? "best" : ""}"><div class="k">${CH[k]}${e.best_channel === k ? " · best" : ""}</div>
     <div class="v">${c ? money(c.price) : "—"}</div><div class="p ${cls(c?.profit)}">${c?.profit != null ? money(c.profit) + " profit" : c ? "add a cost" : "no price yet"}</div></div>`; };
-  const gatedHtml = `<div class="sec"><h3>Can you sell it on Amazon?</h3>
-        <div class="seg">${[["ungated", "Yes"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
+  const el = p.eligibility, canSell = notAmazon ? "" : `<div class="sec"><h3>Can you sell it?</h3>
+        <div>${gatedPill(p)}</div>
+        <div class="hint" style="margin-top:6px">${el ? `${el.source === "spapi" ? "Checked by Amazon" : "Set by you"} ${ago(el.checked_at)}${el.reason ? " · " + esc(el.reason) : ""}` : "Not checked yet. Ask Claude to check it, or set it under Edit."}
+          ${el?.approval_url ? ` · <a href="${esc(el.approval_url)}" target="_blank" rel="noopener" style="color:var(--blue)">Request approval</a>` : ""}</div></div>`;
+  const editGated = notAmazon ? "" : `<div class="sec"><h3>Can you sell it on Amazon?</h3><div class="seg">${[["ungated", "Yes"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
           `<button class="btn sm ${p.gated === k ? "on-" + k : ""}" data-gated="${k}">${l}</button>`).join("")}
-          <a class="btn sm" href="${p.links.sellercentral}" target="_blank" rel="noopener">Check in Seller Central ↗</a></div>
-        <div class="hint">${p.eligibility ? `Set ${p.eligibility.source === "spapi" ? "by Amazon" : "by you"} ${ago(p.eligibility.checked_at)}${p.eligibility.reason ? " · " + esc(p.eligibility.reason) : ""}` : "Not checked yet. Check, then tap the answer."}
-          ${p.eligibility?.approval_url ? ` · <a href="${esc(p.eligibility.approval_url)}" target="_blank" rel="noopener" style="color:var(--blue)">Request approval</a>` : ""}</div></div>`;
+          <a class="btn sm" href="${p.links.sellercentral}" target="_blank" rel="noopener">Seller Central ↗</a></div></div>`;
+  const srcs = p.sources.map((x) => `<a class="src ${p.best_source?.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
+          <div style="min-width:0"><div>${fav(x.retailer)}<span class="r">${esc(domain(x.retailer))}</span>${x.pack_qty > 1 ? ` <span class="x2">× ${x.pack_qty}</span>` : ""}${x.promo ? ` <span class="x2">· ${esc(x.promo)}</span>` : ""}</div>
+          ${x.note ? `<div class="note">${esc(x.note)}</div>` : ""}</div><b>${money(x.price)}</b></a>`).join("");
+  const bought = p.inventory.map((i) => `<div class="src"><div><div>${i.qty} × ${money(i.unit_cost)} ${i.store ? "from " + esc(i.store) : ""}</div><div class="x2">${ago(i.bought_at)}</div></div><div>${chPill(i.channel)} <span class="pill ${i.status}">${INV[i.status]}</span></div></div>`).join("");
+  const others = ["ebay", "facebook"].filter((k) => ch[k]).map((k) => `${CH[k]} ${money(ch[k].price)}`);
+  const amz = (e.referral_fee || 0) + (e.fba_fee || 0);
   $("#drawer").innerHTML = `
     <div class="dh"><button class="btn sm x" id="closeBtn" aria-label="Close">${icon("x")}</button>
       <div class="dim" style="font-size:12px">${esc(p.brand || "")}${p.brand ? " · " : ""}${p.asin}</div>
@@ -583,44 +593,41 @@ function drawer(p) {
       <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${p.verdict}">${LABEL[p.verdict]} · ${p.score}/100</span>${gatedPill(p)}</div></div>
     <div class="db">
       <div class="sec"><div class="kv">
-        ${kv("Sell price", money(e.sale_price))}${kv("Your cost", money(e.cost))}${kv("Max cost", money(e.max_cost))}
-        ${kv("Profit", money(e.profit), cls(e.profit))}${kv("ROI", pct(e.roi), cls(e.roi))}${kv("Amazon fees", money((e.referral_fee || 0) + (e.fba_fee || 0) || null))}
-        ${kv("Sales / month", num(s.monthly_sold))}${kv("Rank", num(s.sales_rank))}${kv("Sellers", s.offer_count ?? "—")}
-      </div></div>
-
-      <div class="sec"><h3>Where it sells</h3>
-        <div class="chan">${["amazon", "ebay", "facebook"].map(chanCard).join("")}</div>
-        <form class="inline-form" id="chanForm"><select name="channel"><option value="ebay">eBay sells for</option><option value="facebook">Facebook sells for</option></select>
-          <input name="price" type="number" step="0.01" placeholder="$" required style="width:90px"><button class="btn sm">Save</button></form>
-        <div class="linkrow" style="margin-top:8px"><a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a><a href="${p.links.ebay_active}" target="_blank" rel="noopener">eBay active ↗</a><a href="${p.links.facebook}" target="_blank" rel="noopener">Facebook Marketplace ↗</a></div></div>
-
-      ${notAmazon ? "" : gatedHtml}
+        ${kv("Sell price", money(e.sale_price))}${kv("Max cost", money(e.max_cost))}${kv("Profit", money(e.profit), cls(e.profit))}
+        ${kv("ROI", pct(e.roi), cls(e.roi))}${kv("Rank", num(s.sales_rank))}${kv("Sellers", s.offer_count ?? "—")}
+      </div>
+      <div class="hint" style="margin-top:6px">${e.cost ? `Your cost ${money(e.cost)}` : "No store price yet"}${amz ? ` · Amazon fees ${money(amz)}` : ""}${s.monthly_sold ? ` · ${num(s.monthly_sold)}/mo` : ""}${others.length ? ` · ${others.join(", ")}` : ""}</div></div>
 
       <div class="sec"><h3>Why this score</h3><ul class="why">
         ${p.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}${p.flags.map((f) => `<li class="warn">${esc(f)}</li>`).join("")}
         ${p.enrichment?.notes ? `<li>${esc(p.enrichment.notes)}</li>` : ""}</ul></div>
 
-      <div class="sec"><h3 style="display:flex;justify-content:space-between;align-items:center">Where to buy <button class="btn sm" id="findPrices">${icon("search")}Find store prices</button></h3>
-        ${p.sources.map((x) => `<a class="src ${p.best_source?.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
-          <div style="min-width:0"><div>${fav(x.retailer)}<span class="r">${esc(domain(x.retailer))}</span>${x.pack_qty > 1 ? ` <span class="x2">× ${x.pack_qty}</span>` : ""}${x.promo ? ` <span class="x2">· ${esc(x.promo)}</span>` : ""}</div>
-          ${x.note ? `<div class="note">${esc(x.note)}</div>` : ""}</div><b>${money(x.price)}</b></a>`).join("") || `<div class="hint" style="margin-bottom:8px">No store prices yet.</div>`}
-        <div class="linkrow" style="margin:10px 0">${stores.map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">${esc(p.links.retail[k].name)} ↗</a>`).join("")}</div>
-        <form class="log" id="logForm"><input name="retailer" placeholder="Store" required list="storeList"><input name="price" type="number" step="0.01" placeholder="Price" required><input name="pack_qty" type="number" min="1" placeholder="Qty"><button class="btn">Save</button></form>
-        <div class="hint">Qty = how many store units make one Amazon listing (2 for a 2-pack).</div></div>
+      ${canSell}
 
-      <div class="sec"><h3>I bought this</h3>
-        ${p.inventory.map((i) => `<div class="src"><div><div>${i.qty} × ${money(i.unit_cost)} ${i.store ? "from " + esc(i.store) : ""}</div><div class="x2">${ago(i.bought_at)}</div></div><div>${chPill(i.channel)} <span class="pill ${i.status}">${INV[i.status]}</span></div></div>`).join("")}
-        <form class="inline-form" id="buyForm"><input name="qty" type="number" min="1" value="1" style="width:60px" title="Quantity"><input name="unit_cost" type="number" step="0.01" placeholder="Cost each $" style="width:100px" required>
-          <input name="store" placeholder="Store" list="storeList" style="width:100px"><select name="channel"><option value="">Sell on…</option><option value="amazon">Amazon</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select>
-          <button class="btn sm primary">Add to inventory</button></form></div>
+      ${srcs || bought ? `<div class="sec"><h3>${srcs ? "Where to buy" : "You bought this"}</h3>${srcs}${srcs && bought ? `<h3 style="margin-top:14px">You bought this</h3>` : ""}${bought}</div>` : ""}
 
-      <div class="sec"><h3>Research</h3><div class="linkrow">
-        ${p.links.amazon ? `<a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon ↗</a><a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa ↗</a><a href="${p.links.offers}" target="_blank" rel="noopener">Offers ↗</a>` : `<a href="${p.links.amazon_search}" target="_blank" rel="noopener">Search Amazon ↗</a>`}
-        <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a></div></div>
+      <div class="sec"><div class="linkrow">
+        ${p.links.amazon ? `<a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon ↗</a><a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa ↗</a>` : `<a href="${p.links.amazon_search}" target="_blank" rel="noopener">Search Amazon ↗</a>`}
+        <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a>
+        ${stores.slice(0, 4).map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">${esc(p.links.retail[k].name)} ↗</a>`).join("")}</div></div>
 
-      <div class="sec"><h3>Status</h3><div class="seg">
-        ${["watch", "buy", "research", "pass", "dead"].map((st) => `<button class="btn sm ${p.status === st ? "on" : ""}" data-status="${st}">${cap(st)}</button>`).join("")}</div>
-        <div class="hint">Pass keeps it in history. Dead hides it.</div></div>
+      <details class="edit"><summary>Edit</summary>
+        ${editGated}
+        <div class="sec"><h3>Store price</h3>
+          <form class="log" id="logForm"><input name="retailer" placeholder="Store" required list="storeList"><input name="price" type="number" step="0.01" placeholder="Price" required><input name="pack_qty" type="number" min="1" placeholder="Qty"><button class="btn">Save</button></form>
+          <div class="hint">Qty = store units per Amazon listing (2 for a 2-pack).</div>
+          <button class="btn sm" id="findPrices" style="margin-top:8px">${icon("search")}Find store prices</button></div>
+        <div class="sec"><h3>eBay / Facebook price</h3>
+          <form class="inline-form" id="chanForm"><select name="channel"><option value="ebay">eBay sells for</option><option value="facebook">Facebook sells for</option></select>
+            <input name="price" type="number" step="0.01" placeholder="$" required style="width:90px"><button class="btn sm">Save</button></form></div>
+        <div class="sec"><h3>I bought this</h3>
+          <form class="inline-form" id="buyForm"><input name="qty" type="number" min="1" value="1" style="width:60px" title="Quantity"><input name="unit_cost" type="number" step="0.01" placeholder="Cost each $" style="width:100px" required>
+            <input name="store" placeholder="Store" list="storeList" style="width:100px"><select name="channel"><option value="">Sell on…</option><option value="amazon">Amazon</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select>
+            <button class="btn sm primary">Add to inventory</button></form></div>
+        <div class="sec"><h3>Status</h3><div class="seg">
+          ${["watch", "buy", "research", "pass", "dead"].map((st) => `<button class="btn sm ${p.status === st ? "on" : ""}" data-status="${st}">${cap(st)}</button>`).join("")}</div>
+          <div class="hint">Pass keeps it in history. Dead hides it.</div></div>
+      </details>
     </div>`;
   $("#closeBtn").onclick = closeDrawer;
   const refresh = async (np, msg) => { drawer(np); toast(msg); await loadProducts(); rerender(); };

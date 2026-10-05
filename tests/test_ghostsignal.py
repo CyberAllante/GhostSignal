@@ -350,3 +350,19 @@ def test_gift_cards_and_kindle_are_restricted():
     for t in ("Wyze Smart Scale X - Digital Bathroom Scale", "Starbucks Blonde Roast Iced Coffee", "Superer Micro USB Charger Cable Fit for Kindle Paperwhite",
               "simplehuman Code M 100 Count Custom Fit Liners"):
         assert not r.check({"title": t, "brand": ""}), t
+
+
+def test_mcp_cleanup_and_outcomes(tmp_path):
+    from ghostsignal import mcp
+    path = tmp_path / "m.db"
+    c = db.connect(str(path))
+    db.upsert_product(c, "B07BH5BYZ7", title="Amazon Basics AA Batteries", brand="Amazon Basics")
+    db.upsert_product(c, "B093Z1F4QM", title="Airbnb eGift Card - Standard")
+    db.upsert_product(c, "B000000009", title="Real Product", brand="Acme")
+    c.commit()
+    prev = mcp.t_cleanup(c, {})
+    assert "restricted: 2" in prev
+    assert "Archived 2" in mcp.t_cleanup(c, {"archive": True, "groups": ["restricted"]})
+    assert "Restored 2" in mcp.t_restore(c, {})
+    assert "Zorbo" in mcp.t_blocked_brands(c, {"add": ["Zorbo"]})
+    assert "Nothing sold" in mcp.t_outcomes(c, {})

@@ -25,7 +25,7 @@ You are the analyst; the user only wants to see what you picked. Work like this:
    own research (`log_price`, `set_sell_price`, `set_snapshot`, `set_gated`), or ask the user a short question.
 4. Never treat PASS as final. Prices and competition change; PASSes are re-checked on a slow schedule.
 5. Use `note` to remember findings (pack sizes, brand quirks) so you don't redo research.
-6. Prices from automatic lookups can be the wrong pack size. Verify before calling something a BUY.
+6. Keep the list clean: `cleanup` previews junk (Amazon brands, gift cards, cannot-sell, PASS); archive on request.\n   `outcomes` shows whether BUY verdicts really made money.\n7. Prices from automatic lookups can be the wrong pack size. Verify before calling something a BUY.
 Verdicts: BUY = strong and verified; RESEARCH = promising, something unverified; PASS = not now."""
 
 VERDICTS = ["BUY", "RESEARCH", "PASS"]
@@ -290,6 +290,63 @@ def t_run_now(conn, a):
     return "Started: refreshing data, store prices, gating and scores for whatever is connected. Check status in a few minutes."
 
 
+def _live_views(conn):
+    return [engine.product_view(conn, r[0]) for r in conn.execute("SELECT asin FROM products WHERE status != 'dead'")]
+
+
+_GROUPS = {
+    "restricted": lambda v: bool(v["restricted"]),
+    "cant_sell": lambda v: v["gated"] == "blocked" and not v["economics"].get("best_channel") and not v["restricted"],
+    "pass": lambda v: v["verdict"] == "PASS",
+}
+
+
+def t_cleanup(conn, a):
+    """Preview (default) or archive junk: Amazon-owned brands/gift cards/your blocklist, cannot-sell, all PASS."""
+    views = _live_views(conn)
+    groups = a.get("groups") or []
+    out = []
+    for name, f in _GROUPS.items():
+        hits = [v for v in views if f(v)]
+        out.append(f"{name}: {len(hits)}" + ("" if not hits else " e.g. " + "; ".join((v["title"] or v["asin"])[:40] for v in hits[:3])))
+    if a.get("archive") and groups:
+        asins = {v["asin"] for v in views if any(_GROUPS[g](v) for g in groups if g in _GROUPS)}
+        n = db.archive_products(conn, list(asins))
+        conn.commit()
+        return f"Archived {n} products ({', '.join(groups)}). Hidden, not deleted; `restore` brings them back."
+    return "Would archive:\n" + "\n".join(out) + "\nCall again with archive=true and groups=[...] to hide them."
+
+
+def t_restore(conn, a):
+    asins = [x.strip().upper() for x in (a.get("asins") or [])]
+    if not asins:
+        asins = [r[0] for r in conn.execute("SELECT asin FROM products WHERE status = 'dead'")]
+    n = db.archive_products(conn, asins, restore=True)
+    conn.commit()
+    return f"Restored {n} products."
+
+
+def t_blocked_brands(conn, a):
+    from . import restrictions
+    cur = restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))
+    if a.get("add") or a.get("remove"):
+        gone = {x.lower() for x in (a.get("remove") or [])}
+        cur = [b for b in cur if b.lower() not in gone]
+        cur += [b for b in (a.get("add") or []) if b.lower() not in {x.lower() for x in cur}]
+        db.set_setting(conn, restrictions.SETTING, "\n".join(cur))
+        conn.commit()
+    return "Blocked brands: " + (", ".join(cur) or "none") + ". (Amazon's own brands, gift cards and digital codes are always blocked.)"
+
+
+def t_outcomes(conn, a):
+    o = db.outcomes(conn)
+    if not o["sold_lots"]:
+        return "Nothing sold yet, so no predicted-vs-actual data. Log purchases and sales to build it."
+    lines = [f"{v}: {d['lots']} lots sold, {d['wins']} made money ({d['win_rate']:.0%}), actual {_money(d['profit'])}"
+             + (f" vs predicted {_money(d['predicted'])}" if d["predicted_n"] else "") for v, d in o["by_verdict"].items()]
+    return f"Total profit {_money(o['total_profit'])} over {o['sold_lots']} lots.\n" + "\n".join(lines)
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -324,6 +381,12 @@ TOOLS = {
     "inventory": _tool(t_inventory, "What the user owns and where it's listed."),
     "mark_sold": _tool(t_mark_sold, "Mark an inventory lot sold (id from inventory).", {"id": I, "sold_price": N}, ["id", "sold_price"]),
     "track_seller": _tool(t_track_seller, "Track a seller storefront; their products are added automatically.", {"seller": S, "name": S}, ["seller"]),
+    "cleanup": _tool(t_cleanup, "Find junk (Amazon-owned brands, gift cards, cannot-sell, PASS) and optionally archive it. Archived = hidden, not deleted.",
+                     {"groups": {"type": "array", "items": {"type": "string", "enum": list(_GROUPS)}}, "archive": {"type": "boolean"}}),
+    "restore": _tool(t_restore, "Un-archive products (given ASINs, or everything archived).", {"asins": {"type": "array", "items": S}}),
+    "blocked_brands": _tool(t_blocked_brands, "View or edit the user's never-show brand list.",
+                            {"add": {"type": "array", "items": S}, "remove": {"type": "array", "items": S}}),
+    "outcomes": _tool(t_outcomes, "Predicted vs actual: how each verdict at purchase time performed once sold."),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 
