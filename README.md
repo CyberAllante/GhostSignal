@@ -74,7 +74,7 @@ gs export asins --verdict RESEARCH  # paste into Stealth Seller or Keepa for dee
 gs status B00NLVM6WK pass           # done with it (it stays in history)
 ```
 
-You can do all of this in the dashboard as well. Each card shows Buy Box, Max Cost, Profit, ROI, offers, rank, monthly sales, your network's orders, the logged sources and one-click searches at likely stores. **COPY ASINS** puts your whole watchlist on the clipboard for Stealth Seller bulk lookup.
+The dashboard (`gs serve`) is a simple list: click any product to see the numbers, where to buy it, and to log a store price. **Add** pastes ASINs or uploads your order files; **Scan** rescores everything.
 
 ## 3. Automation
 
