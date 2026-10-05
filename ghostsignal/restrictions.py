@@ -19,7 +19,12 @@ AMAZON_BRANDS = {
 # Title phrases that mean the same thing.
 TITLE_PHRASES = re.compile(
     r"\b(amazon\s?basics?|amazon\s?essentials|amazon\s?elements|by\s+amazon|amazon\s+brand|"
-    r"solimo|happy\s+belly|mama\s+bear|wickedly\s+prime|amazon\s+fresh)\b", re.I)
+    r"solimo|happy\s+belly|mama\s+bear|wickedly\s+prime|amazon\s+fresh|"
+    r"amazon\s+kindle|amazon\s+echo|amazon\s+fire|amazon\s+smart)\b", re.I)
+
+# Gift cards and digital codes: not resellable, so there's nothing to arbitrage.
+DIGITAL_GOODS = re.compile(
+    r"(gift\s*cards?|e-?gift|balance\s+(auto-?)?reload|(e-?mail|email)\s+delivery|digital\s+code|\[digital)", re.I)
 
 SETTING = "blocked_brands"
 
@@ -36,6 +41,8 @@ def check(product: dict, custom: list[str] | None = None) -> str:
     """Return a human reason if this product can't/shouldn't be resold, else ''."""
     brand, title = product.get("brand") or "", product.get("title") or ""
     nb = _norm(brand)
+    if DIGITAL_GOODS.search(title):
+        return "Gift card / digital item — can't be resold"
     if nb in AMAZON_BRANDS:
         return f"Amazon-owned brand ({brand}) — only Amazon can sell it"
     if TITLE_PHRASES.search(title) and (not nb or nb in AMAZON_BRANDS):

@@ -340,3 +340,13 @@ def test_pin_login_and_lockout(tmp_path, monkeypatch):
     assert login("4321")[0].startswith("/login?error")          # PIN locked after 5 bad PINs
     assert login("long-password-xyz")[0] == "/"                  # real password still works
     srv.shutdown()
+
+
+def test_gift_cards_and_kindle_are_restricted():
+    from ghostsignal import restrictions as r
+    for t in ("Airbnb eGift Card - $100 - Standard", "Uber Gift Card - E-mail Delivery", "$10 XBOX Gift Card [Digital Code]",
+              "Amazon Gift Card Balance Reload", "Best Buy Physical Gift Card", "Amazon Kindle (16 GB) - Lightest"):
+        assert r.check({"title": t, "brand": ""}), t
+    for t in ("Wyze Smart Scale X - Digital Bathroom Scale", "Starbucks Blonde Roast Iced Coffee", "Superer Micro USB Charger Cable Fit for Kindle Paperwhite",
+              "simplehuman Code M 100 Count Custom Fit Liners"):
+        assert not r.check({"title": t, "brand": ""}), t
