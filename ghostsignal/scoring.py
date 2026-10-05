@@ -35,22 +35,25 @@ class Config:
     ebay_fee_pct: float = 0.136
     ebay_fixed: float = 0.40
     ebay_ship: float = 6.50
+    facebook_fee_pct: float = 0.0     # local pickup is free; set 0.10 if you ship
 
 
 @dataclass
 class Economics:
-    sale_price: float | None
+    sale_price: float | None          # Amazon price
     cost: float | None
     referral_fee: float | None
     fba_fee: float | None
     inbound: float
     net_payout: float | None          # what Amazon pays you before your cost
-    profit: float | None
-    roi: float | None
+    profit: float | None              # best channel
+    roi: float | None                 # best channel
     margin: float | None
-    max_cost: float | None            # highest buy cost that still hits target ROI
+    max_cost: float | None            # highest buy cost that still hits target ROI on the best channel
     ebay_profit: float | None = None
-    best_channel: str | None = None
+    best_channel: str | None = None   # amazon | ebay | facebook
+    facebook_profit: float | None = None
+    channels: dict = field(default_factory=dict)   # per channel: price, net, profit, roi
 
 
 @dataclass
@@ -73,28 +76,37 @@ def referral_rate(category: str | None, price: float, default: float = 0.15) -> 
 
 
 def economics(sale_price, cost, category=None, referral_pct=None, fba_fee=None,
-              ebay_price=None, cfg: Config | None = None) -> Economics:
+              ebay_price=None, cfg: Config | None = None, facebook_price=None,
+              exclude: tuple = ()) -> Economics:
+    """Profit on every channel we have a price for; headline numbers = the best channel."""
     cfg = cfg or Config()
-    if not sale_price:
-        return Economics(None, cost, None, None, cfg.inbound_per_unit, None, None, None, None, None)
-    rate = referral_pct if referral_pct else referral_rate(category, sale_price, cfg.default_referral)
-    ref = round(sale_price * rate, 2)
-    fba = fba_fee if fba_fee is not None else cfg.default_fba_fee
-    net = round(sale_price - ref - fba - cfg.inbound_per_unit, 2)
-    max_cost = round(net / (1 + cfg.target_roi), 2) if net > 0 else 0.0
-    profit = roi = margin = None
-    if cost:
-        profit = round(net - cost, 2)
-        roi = round(profit / cost, 3)
-        margin = round(profit / sale_price, 3)
+    channels: dict[str, dict] = {}
+    ref = fba = amz_net = None
+    if sale_price:
+        rate = referral_pct if referral_pct else referral_rate(category, sale_price, cfg.default_referral)
+        ref = round(sale_price * rate, 2)
+        fba = fba_fee if fba_fee is not None else cfg.default_fba_fee
+        amz_net = round(sale_price - ref - fba - cfg.inbound_per_unit, 2)
+        channels["amazon"] = {"price": sale_price, "net": amz_net}
+    if ebay_price:
+        channels["ebay"] = {"price": ebay_price, "net": round(
+            ebay_price * (1 - cfg.ebay_fee_pct) - cfg.ebay_fixed - cfg.ebay_ship, 2)}
+    if facebook_price:
+        channels["facebook"] = {"price": facebook_price, "net": round(facebook_price * (1 - cfg.facebook_fee_pct), 2)}
+    for c in channels.values():
+        c["profit"] = round(c["net"] - cost, 2) if cost else None
+        c["roi"] = round(c["profit"] / cost, 3) if cost else None
 
-    ebay_profit = best = None
-    if ebay_price and cost:
-        ebay_profit = round(ebay_price * (1 - cfg.ebay_fee_pct) - cfg.ebay_fixed - cfg.ebay_ship - cost, 2)
-    if profit is not None:
-        best = "ebay" if ebay_profit is not None and ebay_profit > profit else "amazon"
-    return Economics(sale_price, cost, ref, fba, cfg.inbound_per_unit, net, profit, roi, margin,
-                     max_cost, ebay_profit, best)
+    usable = {k: v for k, v in channels.items() if k not in exclude}
+    best = max(usable, key=lambda k: usable[k]["net"]) if usable else None
+    b = usable.get(best, {})
+    best_net = b.get("net")
+    max_cost = round(best_net / (1 + cfg.target_roi), 2) if best_net and best_net > 0 else (0.0 if best else None)
+    profit, roi = b.get("profit"), b.get("roi")
+    margin = round(profit / b["price"], 3) if profit is not None else None
+    return Economics(sale_price, cost, ref, fba, cfg.inbound_per_unit, amz_net, profit, roi, margin, max_cost,
+                     channels.get("ebay", {}).get("profit"), best,
+                     channels.get("facebook", {}).get("profit"), channels)
 
 
 def _clamp(x: float) -> float:
@@ -103,7 +115,7 @@ def _clamp(x: float) -> float:
 
 def score_product(product: dict, snapshot: dict | None, sources: list[dict], orders: dict,
                   enrichment: dict | None = None, cfg: Config | None = None,
-                  eligibility: dict | None = None) -> Signal:
+                  eligibility: dict | None = None, channel_prices: dict | None = None) -> Signal:
     cfg = cfg or Config()
     snap = snapshot or {}
     reasons: list[str] = []
@@ -124,16 +136,23 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
             best = {**s, "unit_cost": round(unit_cost, 2)}
     cost = best["unit_cost"] if best else None
 
-    econ = economics(sale, cost, product.get("category"), snap.get("referral_pct"),
-                     snap.get("fba_fee"), snap.get("ebay_sold_price"), cfg)
+    cp = channel_prices or {}
+    gated = (eligibility or {}).get("status") or "unknown"
+    econ = economics(sale, cost, product.get("category"), snap.get("referral_pct"), snap.get("fba_fee"),
+                     cp.get("ebay") or snap.get("ebay_sold_price"), cfg, cp.get("facebook"),
+                     exclude=("amazon",) if gated == "blocked" else ())
 
     # --- profit / ROI ---
-    best_profit = max(p for p in (econ.profit, econ.ebay_profit, -999) if p is not None)
+    NAMES = {"amazon": "Amazon", "ebay": "eBay", "facebook": "Facebook Marketplace"}
+    best_profit = econ.profit if econ.profit is not None else -999
     if econ.profit is not None:
         pts["profit"] = _clamp(best_profit / 10) * WEIGHTS["profit"]
         pts["roi"] = _clamp((econ.roi or 0) / 1.0) * WEIGHTS["roi"]
-        reasons.append(f"Est. profit ${best_profit:.2f}/unit, ROI {econ.roi:.0%}"
-                       + (f" (best on {econ.best_channel})" if econ.best_channel == "ebay" else ""))
+        reasons.append(f"Est. profit ${best_profit:.2f}/unit, ROI {econ.roi:.0%} on {NAMES[econ.best_channel]}")
+        others = [f"{NAMES[k]} ${v['profit']:.2f}" for k, v in econ.channels.items()
+                  if k != econ.best_channel and v.get("profit") is not None]
+        if others:
+            reasons.append("Also: " + ", ".join(others))
     elif econ.max_cost:
         flags.append(f"No retail cost yet — buy under ${econ.max_cost:.2f} for {cfg.target_roi:.0%} ROI")
 
@@ -185,14 +204,13 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     # --- Can you actually sell it? Confirmed status (Amazon SP-API or you) beats the AI guess. ---
     e = enrichment or {}
     penalty = 0
-    gated = (eligibility or {}).get("status") or "unknown"
     if gated == "ungated":
         reasons.append("You can sell this (ungated)")
     elif gated == "approval":
         flags.append("Gated — you need approval to sell this")
         penalty += 10
     elif gated == "blocked":
-        flags.append("You can't sell this on your account")
+        flags.append("You can't sell this on Amazon" + (" — eBay/Facebook only" if econ.best_channel else ""))
     elif e.get("gating_risk") == "high":
         flags.append("Likely gated — check eligibility before buying")
         penalty += 15
@@ -211,7 +229,7 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     score = int(round(max(0, sum(pts.values()) - penalty)))
 
     if (econ.profit is not None and score >= cfg.buy_score and best_profit >= cfg.min_profit_buy
-            and max(econ.roi or 0, (econ.ebay_profit or 0) / cost if cost else 0) >= cfg.min_roi_buy):
+            and (econ.roi or 0) >= cfg.min_roi_buy):
         verdict = "BUY"
     elif econ.profit is not None and best_profit < 1:
         verdict = "PASS"
@@ -222,9 +240,9 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
         verdict = "PASS"
 
     # Gating overrides: never tell you to BUY something you can't list.
-    if gated == "blocked":
+    if gated == "blocked" and econ.best_channel is None:
         verdict = "PASS"
-    elif gated == "approval" and verdict == "BUY":
+    elif gated == "approval" and verdict == "BUY" and econ.best_channel == "amazon":
         verdict = "RESEARCH"
 
     return Signal(score, verdict, econ, reasons, flags, best, gated)

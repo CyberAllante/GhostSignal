@@ -101,7 +101,44 @@ CREATE TABLE IF NOT EXISTS tracked_sellers (
     seller_id  TEXT PRIMARY KEY,
     name       TEXT,
     added_at   TEXT NOT NULL,
-    last_pull  TEXT
+    last_pull  TEXT,
+    status     TEXT NOT NULL DEFAULT 'active',   -- active | paused
+    asin_count INTEGER DEFAULT 0,
+    new_count  INTEGER DEFAULT 0                 -- ASINs that were new on the last pull
+);
+
+-- What it sells for on eBay / Facebook Marketplace (Amazon comes from snapshots).
+CREATE TABLE IF NOT EXISTS channel_prices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asin        TEXT NOT NULL REFERENCES products(asin),
+    channel     TEXT NOT NULL,          -- ebay | facebook
+    price       REAL NOT NULL,
+    note        TEXT DEFAULT '',
+    captured_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_prices ON channel_prices(asin, channel, id);
+
+-- What you actually bought, where it's listed, what it sold for. One row per lot.
+CREATE TABLE IF NOT EXISTS inventory (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asin        TEXT NOT NULL REFERENCES products(asin),
+    qty         INTEGER NOT NULL DEFAULT 1,
+    unit_cost   REAL,
+    store       TEXT DEFAULT '',
+    bought_at   TEXT NOT NULL,
+    channel     TEXT DEFAULT '',        -- amazon | ebay | facebook ('' = not listed yet)
+    list_price  REAL,
+    status      TEXT NOT NULL DEFAULT 'in_hand',   -- in_hand | listed | sold
+    sold_qty    INTEGER NOT NULL DEFAULT 0,
+    sold_price  REAL,                   -- per unit
+    sold_at     TEXT,
+    notes       TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_asin ON inventory(asin);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 
 -- Can you sell it? status: ungated | approval | blocked. source: spapi | manual
@@ -135,7 +172,31 @@ def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a database was first created."""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(tracked_sellers)")}
+    for col, ddl in (("status", "TEXT NOT NULL DEFAULT 'active'"), ("asin_count", "INTEGER DEFAULT 0"),
+                     ("new_count", "INTEGER DEFAULT 0")):
+        if col not in have:
+            conn.execute(f"ALTER TABLE tracked_sellers ADD COLUMN {col} {ddl}")
+
+
+def get_setting(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row and row["value"] else default
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+
+def add_seller(conn: sqlite3.Connection, seller_id: str, name: str | None = None) -> None:
+    conn.execute("INSERT OR IGNORE INTO tracked_sellers (seller_id, name, added_at) VALUES (?, ?, ?)",
+                 (seller_id, name, now()))
 
 
 def upsert_product(conn: sqlite3.Connection, asin: str, **fields) -> None:
@@ -258,3 +319,72 @@ def set_eligibility(conn: sqlite3.Connection, asin: str, status: str, source: st
 def get_eligibility(conn: sqlite3.Connection, asin: str) -> dict | None:
     row = conn.execute("SELECT * FROM eligibility WHERE asin = ?", (asin,)).fetchone()
     return dict(row) if row else None
+
+
+CHANNELS = ("amazon", "ebay", "facebook")
+
+
+def set_channel_price(conn: sqlite3.Connection, asin: str, channel: str, price: float, note: str = "") -> None:
+    if channel not in ("ebay", "facebook"):
+        raise ValueError("channel must be ebay or facebook (Amazon prices come from snapshots)")
+    upsert_product(conn, asin)
+    conn.execute("INSERT INTO channel_prices (asin, channel, price, note, captured_at) VALUES (?, ?, ?, ?, ?)",
+                 (asin.upper(), channel, price, note, now()))
+
+
+def channel_prices(conn: sqlite3.Connection, asin: str) -> dict:
+    rows = conn.execute(
+        """SELECT c.channel, c.price FROM channel_prices c
+           JOIN (SELECT channel, MAX(id) mid FROM channel_prices WHERE asin = ? GROUP BY channel) m ON m.mid = c.id""",
+        (asin,)).fetchall()
+    return {r["channel"]: r["price"] for r in rows}
+
+
+def new_item_id(conn: sqlite3.Connection) -> str:
+    """10-char ID for things that aren't on Amazon (e.g. a Facebook find): GS + 8 digits."""
+    n = conn.execute("SELECT COUNT(*) FROM products WHERE asin LIKE 'GS%'").fetchone()[0] + 1
+    while conn.execute("SELECT 1 FROM products WHERE asin = ?", (f"GS{n:08d}",)).fetchone():
+        n += 1
+    return f"GS{n:08d}"
+
+
+def add_inventory(conn: sqlite3.Connection, asin: str, qty: int, unit_cost: float | None, store: str = "",
+                  channel: str = "", list_price: float | None = None, notes: str = "") -> int:
+    if channel and channel not in CHANNELS:
+        raise ValueError(f"channel must be one of {CHANNELS}")
+    upsert_product(conn, asin)
+    cur = conn.execute(
+        """INSERT INTO inventory (asin, qty, unit_cost, store, bought_at, channel, list_price, status, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (asin.upper(), int(qty), unit_cost, store, now(), channel, list_price,
+         "listed" if channel and list_price else "in_hand", notes))
+    return cur.lastrowid
+
+
+def update_inventory(conn: sqlite3.Connection, item_id: int, **fields) -> None:
+    allowed = {"qty", "unit_cost", "store", "channel", "list_price", "status", "sold_qty", "sold_price", "sold_at", "notes"}
+    data = {k: v for k, v in fields.items() if k in allowed}
+    if data.get("channel") and data["channel"] not in CHANNELS:
+        raise ValueError(f"channel must be one of {CHANNELS}")
+    if data.get("status") == "sold":
+        row = conn.execute("SELECT qty FROM inventory WHERE id = ?", (item_id,)).fetchone()
+        data.setdefault("sold_qty", row["qty"] if row else 0)
+        data.setdefault("sold_at", now())
+    elif data.get("channel") and data.get("list_price") is not None and "status" not in data:
+        data["status"] = "listed"
+    if data:
+        conn.execute(f"UPDATE inventory SET {', '.join(f'{k} = ?' for k in data)} WHERE id = ?",
+                     [*data.values(), item_id])
+
+
+def inventory_rows(conn: sqlite3.Connection, asin: str | None = None) -> list[dict]:
+    q = """SELECT i.*, p.title, p.brand, p.image_url FROM inventory i JOIN products p ON p.asin = i.asin"""
+    rows = conn.execute(q + (" WHERE i.asin = ?" if asin else "") + " ORDER BY i.id DESC",
+                        (asin,) if asin else ()).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["profit"] = (round((d["sold_price"] - (d["unit_cost"] or 0)) * d["sold_qty"], 2)
+                       if d["status"] == "sold" and d["sold_price"] is not None else None)
+        out.append(d)
+    return out

@@ -68,6 +68,19 @@ def seed(conn) -> None:
             "INSERT OR IGNORE INTO orders (buyer, order_id, order_date, asin, quantity, source_file) VALUES (?,?,?,?,?,?)",
             (buyer, f"demo-{i}", (today - timedelta(days=ago)).isoformat(), asin, qty, "demo"),
         )
+    # A few things already bought, on different channels, plus a thrift find that isn't on Amazon.
+    if not conn.execute("SELECT 1 FROM inventory").fetchone():
+        db.add_inventory(conn, "B00F0FC3OC", 6, 10.99, "costco", "amazon", 30.89)
+        sold = db.add_inventory(conn, "B00F0FC3OC", 2, 10.99, "costco", "facebook", 22.00)
+        db.update_inventory(conn, sold, status="sold", sold_price=22.00)
+        db.set_channel_price(conn, "B00F0FC3OC", "facebook", 22.00)
+        db.add_inventory(conn, "B00BCK64FC", 4, 3.98, "traderjoes")
+        db.upsert_product(conn, "GS00000001", title="Vintage Pyrex Primary Colors Mixing Bowl Set (4)",
+                          brand="Pyrex", category="Home & Kitchen", origin="demo")
+        db.set_channel_price(conn, "GS00000001", "ebay", 89.00)
+        db.set_channel_price(conn, "GS00000001", "facebook", 65.00)
+        db.add_source(conn, "GS00000001", "goodwill", 14.99, in_stock=1)
+        db.add_inventory(conn, "GS00000001", 1, 14.99, "goodwill", "ebay", 89.00)
     for asin, data in ENRICH.items():
         conn.execute("INSERT OR REPLACE INTO enrichment (asin, updated_at, data) VALUES (?,?,?)",
                      (asin, db.now(), json.dumps({"asin": asin, **data})))

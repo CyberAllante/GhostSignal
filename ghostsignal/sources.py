@@ -47,10 +47,17 @@ def retailer_links(title: str | None, upc: str | None = None) -> dict[str, dict]
 
 def marketplace_links(asin: str, title: str | None = None) -> dict[str, str]:
     q = quote_plus(search_query(title))
-    return {
+    common = {
+        "ebay_sold": f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1",
+        "ebay_active": f"https://www.ebay.com/sch/i.html?_nkw={q}",
+        "facebook": f"https://www.facebook.com/marketplace/search/?query={q}",
+        "amazon_search": f"https://www.amazon.com/s?k={q}",
+    }
+    if asin.startswith("GS"):  # not an Amazon product
+        return common
+    return {**common,
         "amazon": f"https://www.amazon.com/dp/{asin}",
         "offers": f"https://www.amazon.com/gp/offer-listing/{asin}",
         "keepa": f"https://keepa.com/#!product/1-{asin}",
         "sellercentral": f"https://sellercentral.amazon.com/product-search/search?q={asin}",
-        "ebay_sold": f"https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1",
     }

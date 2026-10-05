@@ -130,3 +130,42 @@ def test_gating_overrides_verdict(conn):
 
     db.set_eligibility(conn, "B00F0FC3OC", "blocked")
     assert engine.product_view(conn, "B00F0FC3OC")["gated"] == "blocked"
+
+
+def test_multichannel_best_and_blocked_amazon(conn):
+    from ghostsignal.scoring import economics
+    e = economics(30.0, 10.0, fba_fee=4.0, ebay_price=40.0, facebook_price=22.0)
+    assert e.best_channel == "ebay" and e.channels["facebook"]["profit"] == 12.0
+    assert e.profit == e.channels["ebay"]["profit"]
+    # Can't sell on Amazon, but eBay is still a valid exit -> not forced to PASS
+    snap = {"buy_box": 30.0, "monthly_sold": 500, "offer_count": 5, "fba_fee": 4.0}
+    sig = score_product({}, snap, [{"retailer": "x", "price": 10.0, "pack_qty": 1, "in_stock": 1}],
+                        {"orders": 0}, eligibility={"status": "blocked"}, channel_prices={"ebay": 40.0})
+    assert sig.economics.best_channel == "ebay" and sig.verdict != "PASS"
+
+
+def test_inventory_flow_and_custom_items(conn):
+    item = db.new_item_id(conn)
+    assert item == "GS00000001"
+    db.upsert_product(conn, item, title="Pyrex bowls")
+    db.set_channel_price(conn, item, "facebook", 60.0)
+    lot = db.add_inventory(conn, item, 2, 15.0, "goodwill", "ebay", 80.0)
+    assert db.inventory_rows(conn)[0]["status"] == "listed"
+    db.update_inventory(conn, lot, channel="facebook", status="in_hand", list_price=None)
+    db.update_inventory(conn, lot, status="sold", sold_price=55.0)
+    row = db.inventory_rows(conn)[0]
+    assert row["channel"] == "facebook" and row["sold_qty"] == 2 and row["profit"] == 80.0
+    v = engine.product_view(conn, item)
+    assert v["economics"]["best_channel"] == "facebook" and "amazon" not in v["links"]
+
+
+def test_store_matching():
+    from ghostsignal import stores
+    assert [stores.store_key(x) for x in ("Walmart", "samsclub.com", "Sam's Club", "Amazon.com", "eBay - seller")] == \
+        ["walmart", "samsclub", "samsclub", None, None]
+    offers = stores.pick_offers([
+        {"title": "Peet's Coffee Major Dickason Dark Roast", "source": "samsclub.com", "extracted_price": 23.98, "via": "lens"},
+        {"title": "Peets Major Dickasons Blend Ground Coffee 32oz", "source": "Costco", "extracted_price": 24.99},
+        {"title": "Totally different thing", "source": "Target", "extracted_price": 3.0},
+    ], "Peet's Coffee Major Dickason's Blend Dark Roast Ground Coffee, 32 oz")
+    assert [o["retailer"] for o in offers] == ["samsclub", "costco"]

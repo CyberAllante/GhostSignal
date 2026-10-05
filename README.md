@@ -8,6 +8,10 @@ GhostSignal is a retail arbitrage intelligence system. Instead of hunting for on
 DATA  →  DETECT  →  VERIFY  →  SCORE  →  ALERT
 ```
 
+## One master database, three ways to sell
+
+Every product lives in one list, whether you found it on Amazon, at a thrift store or on Facebook. Each product gets a profit on **Amazon**, **eBay** and **Facebook Marketplace**, and the score uses the best one. Things you buy go into **Inventory**, where you can list them on any channel and move them between channels. If you can't sell something on Amazon but it sells on eBay, it isn't marked Pass.
+
 ## Where products come from
 
 | Signal | How it gets in |
@@ -26,10 +30,11 @@ History is never overwritten. Each check adds a new snapshot, so the system can 
 **On a Mac? Follow [SETUP.md](SETUP.md) step by step.** Run `gs setup` anytime to see what's connected.
 
 ```bash
-pip install -e .            # installs the `gs` command (no required dependencies)
-gs demo                     # loads sample products
-gs serve                    # dashboard at http://127.0.0.1:8787
+./gs demo                   # loads sample products (nothing to install)
+./gs serve                  # dashboard at http://127.0.0.1:8787
 ```
+
+Or `pip install -e .` to get a `gs` command on your PATH.
 
 Optional extras:
 
@@ -126,6 +131,9 @@ ghostsignal/
   keepa.py      Keepa API: product refresh + seller storefront tracking
   enrich.py     Claude product analyst: gating/hazmat/IP risk, replenishable, likely retailers
   sources.py    retailer + marketplace search links
+  stores.py     store prices near you: Google Lens + Google Shopping via SerpAPI
+  spapi.py      Amazon Seller API: real gated check + real fees
+  setup_status.py  the connections checklist (gs setup / Setup page)
   server.py     dashboard API (stdlib)
   web/          dashboard UI
 tools/amazon_orders_scraper.js

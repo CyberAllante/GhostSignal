@@ -20,47 +20,51 @@ cd ghostsignal
 
 If it asks for a GitHub password, the repo is private and you need a token. The easier route is GitHub's website: open the repo, switch to the `claude/product-tracking-resale-db-gc2kr2` branch, click **Code → Download ZIP**, unzip the folder, rename it to `ghostsignal`, move it to your home folder, and run `cd ~/ghostsignal`.
 
-## 3. Install it (one time)
+## 3. Run it (nothing to install)
+
+GhostSignal doesn't need any packages, so skip `pip` and the `.venv`. If you already tried, clear the broken one first:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+rm -rf .venv
 ```
 
-On a Mac, `pip` alone doesn't exist until you run `source .venv/bin/activate`, which turns on the project's own Python.
-
-## 4. Run it
+Then:
 
 ```bash
-gs demo      # optional: loads 5 sample products so the page isn't empty
-gs serve
+./gs demo      # optional: loads sample products so the page isn't empty
+./gs serve
 ```
 
-Open **http://127.0.0.1:8787** in your browser. Press `Ctrl+C` in Terminal to stop it.
+Leave that Terminal window open and go to **http://127.0.0.1:8787** in your browser. If the page says "can't be reached", the server isn't running; run `./gs serve` again and keep the window open. Press `Ctrl+C` to stop it.
 
-**Every time you come back** (new Terminal window):
+**Every time you come back:**
 
 ```bash
-cd ~/ghostsignal && source .venv/bin/activate && gs serve
+cd ~/ghostsignal && ./gs serve
 ```
 
-## 5. See what's connected
+**To get the newest version:**
 
 ```bash
-gs setup
+cd ~/ghostsignal && git pull
 ```
 
-This prints a checklist of what's done and what's left. Nothing is required except steps 1–4.
+## 4. See what's connected
 
-## 6. Add your keys (when you're ready)
+```bash
+./gs setup
+```
+
+This prints a checklist of what's done and what's left. Nothing is required except steps 1–3.
+
+## 5. Add your keys (when you're ready)
 
 ```bash
 cp .env.example .env
 open -e .env
 ```
 
-Fill in whatever you have, save, and you're done. `gs` reads this file on its own.
+Fill in whatever you have, save, and you're done. `./gs` reads this file on its own. Restart `./gs serve` after changing it.
 
 To start fresh without the sample products, run `rm data/ghostsignal.db`.
 
@@ -80,6 +84,6 @@ You need a **Professional** seller account ($39.99/mo, the one you'd sell on any
 Put all four in `.env`, then run:
 
 ```bash
-gs check-gated     # ungated / needs approval / can't sell, for YOUR account
-gs fees            # Amazon's real fees
+./gs check-gated   # ungated / needs approval / can't sell, for YOUR account
+./gs fees          # Amazon's real fees
 ```

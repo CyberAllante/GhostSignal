@@ -188,3 +188,13 @@ def import_asin_text(conn, text: str, source: str = "manual") -> int:
         db.upsert_product(conn, asin, origin=source)
     conn.commit()
     return len(found)
+
+
+def parse_seller_id(text: str) -> str | None:
+    """Seller ID from a raw ID or any Amazon storefront / seller profile URL."""
+    t = (text or "").strip()
+    m = re.search(r"[?&](?:seller|me|sellerID|merchant)=([A-Z0-9]{10,20})", t, re.I)
+    if m:
+        return m.group(1).upper()
+    m = re.fullmatch(r"A[A-Z0-9]{9,19}", t.upper())
+    return m.group(0) if m else None

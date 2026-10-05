@@ -21,6 +21,8 @@
   gs gated ASIN ungated|approval|blocked   record whether you can sell it
   gs check-gated [--all]                   real gated check via Amazon SP-API
   gs fees                                  real Amazon fees via SP-API
+  gs location "Detroit, Michigan, United States"   your area for store prices
+  gs prices [ASIN ...] [--max 25]          store prices near you (needs SERPAPI_KEY)
 """
 
 from __future__ import annotations
@@ -113,13 +115,21 @@ def cmd_refresh(a):
 
 
 def cmd_seller(a):
+    import os
     from . import keepa
     conn = _conn(a)
     if a.action == "add":
-        asins = keepa.seller_storefront(conn, a.seller_id)
-        print(f"Tracking {a.seller_id}: {len(asins)} storefront ASINs added")
+        sid = importers.parse_seller_id(a.seller_id)
+        if not sid:
+            sys.exit("Couldn't find a seller ID. Paste the storefront URL (has seller=A…) or the ID itself.")
+        db.add_seller(conn, sid)
+        conn.commit()
+        if os.environ.get("KEEPA_API_KEY"):
+            print(f"Tracking {sid}: {len(keepa.seller_storefront(conn, sid))} storefront ASINs")
+        else:
+            print(f"Tracking {sid}. Add KEEPA_API_KEY to pull their products.")
     elif a.action == "pull":
-        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers").fetchall():
+        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers WHERE status = 'active'").fetchall():
             print(f"{sid}: {len(keepa.seller_storefront(conn, sid))} ASINs")
     else:
         for r in conn.execute("SELECT * FROM tracked_sellers"):
@@ -146,7 +156,7 @@ def cmd_run(a):
     conn = _conn(a)
     if os.environ.get("KEEPA_API_KEY"):
         from . import keepa
-        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers").fetchall():
+        for (sid,) in conn.execute("SELECT seller_id FROM tracked_sellers WHERE status = 'active'").fetchall():
             keepa.seller_storefront(conn, sid)
         stale = _stale_asins(conn, a.stale_days)
         if stale:
@@ -157,6 +167,9 @@ def cmd_run(a):
         if unchecked:
             print("gated check:", spapi.check_gated(conn, unchecked))
         print("fees updated:", spapi.update_fees(conn, _live_asins(conn)))
+    from . import stores
+    if stores.configured():
+        print("store prices:", stores.find_prices(conn, stores.due_for_check(conn, a.max_prices)))
     if os.environ.get("ANTHROPIC_API_KEY"):
         from . import enrich
         print("enriched:", enrich.enrich(conn))
@@ -199,39 +212,29 @@ def cmd_fees(a):
 
 
 def cmd_setup(a):
-    import os
-    import shutil
-    from . import spapi
-    conn = _conn(a)
-    n = lambda q: conn.execute(q).fetchone()[0]  # noqa: E731
-    try:
-        import anthropic  # noqa: F401
-        has_sdk = True
-    except ImportError:
-        has_sdk = False
-    ok, no = "✅", "⬜"
-    items = [
-        ("Products in your database", n("SELECT COUNT(*) FROM products WHERE origin != 'demo'") > 0,
-         "Add ASINs (gs add …) or import orders (gs import-orders FILE --buyer me)"),
-        ("Your Amazon orders imported", n("SELECT COUNT(*) FROM orders WHERE source_file != 'demo'") > 0,
-         "Run tools/amazon_orders_scraper.js on amazon.com, then gs import-orders"),
-        ("Amazon Seller API (gated check + real fees) — FREE", spapi.configured(),
-         "Seller Central → Apps and Services → Develop Apps → add SPAPI_* to .env (see SETUP.md)"),
-        ("Keepa API (sales history, rank, seller tracking) — PAID", bool(os.environ.get("KEEPA_API_KEY")),
-         "Buy an API plan at keepa.com/#!api → add KEEPA_API_KEY to .env"),
-        ("Claude API (AI risk flags) — PAY AS YOU GO", bool(os.environ.get("ANTHROPIC_API_KEY")) and has_sdk,
-         "console.anthropic.com → API key → add ANTHROPIC_API_KEY to .env, then pip install anthropic"),
-        ("Discord alerts — FREE", bool(os.environ.get("DISCORD_WEBHOOK_URL")),
-         "Discord channel → Edit → Integrations → Webhooks → add DISCORD_WEBHOOK_URL to .env"),
-        ("Automatic scans scheduled", bool(shutil.which("crontab")) and "gs run" in os.popen("crontab -l 2>/dev/null").read(),
-         "crontab -e  →  0 */6 * * * cd ~/ghostsignal && .venv/bin/gs run"),
-    ]
+    from .setup_status import checklist
     print("GhostSignal setup\n")
-    for label, done, todo in items:
-        print(f"{ok if done else no} {label}")
-        if not done:
-            print(f"     → {todo}")
+    for item in checklist(_conn(a)):
+        cost = f" ({item['cost']})" if item["cost"] else ""
+        print(f"{'✅' if item['done'] else '⬜'} {item['label']}{cost}")
+        if not item["done"]:
+            print(f"     {item['what']}\n     → {item['how']}")
     print("\nNothing above is required to start: gs serve works with manual data.")
+
+
+def cmd_location(a):
+    conn = _conn(a)
+    db.set_setting(conn, "location", a.location)
+    conn.commit()
+    print(f"Area set to {a.location}")
+
+
+def cmd_prices(a):
+    from . import stores
+    conn = _conn(a)
+    asins = [x.upper() for x in a.asins] or stores.due_for_check(conn, a.max)
+    print(f"Looking up store prices for {len(asins)} products…")
+    print(stores.find_prices(conn, asins))
 
 
 def cmd_top(a):
@@ -259,7 +262,8 @@ def cmd_show(a):
         print("\nSources:")
         for s in v["sources"]:
             print(f"  {s['retailer']:12} {_money(s['price'])} x{s['pack_qty']} {s['promo'] or ''} {s['url'] or ''}")
-    print(f"\nKeepa: {v['links']['keepa']}")
+    if v["links"].get("keepa"):
+        print(f"\nKeepa: {v['links']['keepa']}")
 
 
 def cmd_links(a):
@@ -296,7 +300,7 @@ def cmd_export(a):
             w.writerow([v["asin"], v["title"], v["brand"], v["category"], v["verdict"], v["score"], e["sale_price"],
                         e["max_cost"], e["cost"], e["profit"], e["roi"],
                         (v["best_source"] or {}).get("retailer"), s.get("monthly_sold"), s.get("sales_rank"),
-                        s.get("offer_count"), v["orders"]["orders"], v["links"]["keepa"]])
+                        s.get("offer_count"), v["orders"]["orders"], v["links"].get("keepa", "")])
     if a.output:
         out.close()
         print(f"Wrote {a.output}")
@@ -365,7 +369,13 @@ def main(argv=None):
     s.add_argument("seller_id", nargs="?"); s.set_defaults(fn=cmd_seller)
     s = sub.add_parser("enrich"); s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_enrich)
     s = sub.add_parser("score"); s.add_argument("--alert", action="store_true"); s.set_defaults(fn=cmd_score)
-    s = sub.add_parser("run"); s.add_argument("--stale-days", type=float, default=3); s.set_defaults(fn=cmd_run)
+    s = sub.add_parser("run"); s.add_argument("--stale-days", type=float, default=3)
+    s.add_argument("--max-prices", type=int, default=50, help="cap store-price lookups per run (SerpAPI cost)")
+    s.set_defaults(fn=cmd_run)
+    s = sub.add_parser("prices"); s.add_argument("asins", nargs="*"); s.add_argument("--max", type=int, default=25)
+    s.set_defaults(fn=cmd_prices)
+    s = sub.add_parser("location"); s.add_argument("location", help='e.g. "Detroit, Michigan, United States"')
+    s.set_defaults(fn=cmd_location)
     s = sub.add_parser("top"); s.add_argument("-n", type=int, default=25); s.add_argument("--verdict")
     s.set_defaults(fn=cmd_top)
     s = sub.add_parser("show"); s.add_argument("asin"); s.set_defaults(fn=cmd_show)

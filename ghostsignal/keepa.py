@@ -108,12 +108,15 @@ def seller_storefront(conn, seller_id: str) -> list[str]:
     data = _get("seller", seller=seller_id, storefront=1)
     seller = (data.get("sellers") or {}).get(seller_id) or {}
     asins = seller.get("asinList") or []
+    known = {r[0] for r in conn.execute("SELECT asin FROM products")}
+    new = [a for a in asins if a not in known]
     for asin in asins:
         db.upsert_product(conn, asin, origin=f"seller:{seller_id}")
+    db.add_seller(conn, seller_id)
     conn.execute(
-        """INSERT INTO tracked_sellers (seller_id, name, added_at, last_pull) VALUES (?, ?, ?, ?)
-           ON CONFLICT(seller_id) DO UPDATE SET last_pull = excluded.last_pull, name = COALESCE(excluded.name, name)""",
-        (seller_id, seller.get("sellerName"), db.now(), db.now()),
+        """UPDATE tracked_sellers SET last_pull = ?, name = COALESCE(?, name), asin_count = ?, new_count = ?
+           WHERE seller_id = ?""",
+        (db.now(), seller.get("sellerName"), len(asins), len(new), seller_id),
     )
     conn.commit()
     return asins

@@ -26,7 +26,8 @@ def evaluate(conn, asin: str, cfg: Config | None = None):
     sources = [dict(s) for s in db.latest_sources(conn, asin)]
     orders = db.order_stats(conn, asin)
     sig = score_product(dict(product), dict(snap) if snap else None, sources, orders,
-                        _enrichment(conn, asin), cfg, db.get_eligibility(conn, asin))
+                        _enrichment(conn, asin), cfg, db.get_eligibility(conn, asin),
+                        db.channel_prices(conn, asin))
     return product, snap, sources, orders, sig
 
 
@@ -65,7 +66,8 @@ def format_alert(c: dict) -> str:
         lines.append(f"Profit ${e.profit:.2f} | ROI {e.roi:.0%}")
     lines += [f"• {r}" for r in s.reasons]
     lines += [f"⚠ {f}" for f in s.flags]
-    lines.append(marketplace_links(c["asin"])["keepa"])
+    links = marketplace_links(c["asin"])
+    lines.append(links.get("keepa") or links["ebay_sold"])
     return "\n".join(lines)
 
 
@@ -96,6 +98,8 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "orders": orders,
         "enrichment": _enrichment(conn, asin),
         "gated": sig.gated,
+        "channel_prices": db.channel_prices(conn, asin),
+        "inventory": db.inventory_rows(conn, asin),
         "eligibility": db.get_eligibility(conn, asin),
         "score": sig.score,
         "verdict": sig.verdict,

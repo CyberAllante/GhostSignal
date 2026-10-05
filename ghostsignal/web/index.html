@@ -5,180 +5,291 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GhostSignal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0a0a; --card: #111111; --hover: #171717; --border: #222222;
-    --text: #fafafa; --muted: #8a8a8a; --faint: #5a5a5a;
-    --green: #4ade80; --amber: #fbbf24; --red: #f87171;
+    --navy: #142C51; --navy-hover: rgba(255,255,255,.1); --navy-active: rgba(255,255,255,.2);
+    --bg: #f9fafb; --card: #ffffff; --border: #e5e7eb; --row: #f3f4f6;
+    --text: #111827; --muted: #6b7280; --faint: #9ca3af;
+    --green: #15803d; --green-bg: #dcfce7; --amber: #b45309; --amber-bg: #fef3c7; --red: #b91c1c; --red-bg: #fee2e2;
+    --blue: #2563eb; --blue-bg: #eff6ff; --purple: #9333ea; --purple-bg: #faf5ff; --orange: #ea580c; --orange-bg: #fff7ed;
+    --shadow: 0 1px 2px rgba(0,0,0,.05);
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
   a { color: inherit; text-decoration: none; }
-  button, input, select { font: inherit; color: inherit; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 16px 64px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 
-  /* header */
-  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-  .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--text); color: var(--bg); display: grid; place-items: center; font-weight: 600; font-size: 13px; }
-  h1 { font-size: 16px; font-weight: 600; margin: 0; }
-  .sub { color: var(--muted); font-size: 13px; }
-  .head .sp { flex: 1; }
+  /* sidebar */
+  aside.side { position: fixed; inset: 0 auto 0 0; width: 224px; background: var(--navy); color: #fff; display: flex; flex-direction: column; z-index: 30; transition: width .2s; }
+  .side .brand { height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,.1); }
+  .side .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+  .mark { width: 30px; height: 30px; border-radius: 8px; background: #fff; color: var(--navy); display: grid; place-items: center; font-weight: 700; }
+  .side nav { flex: 1; padding: 16px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .side nav a, .side .foot a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; color: rgba(255,255,255,.7); font-weight: 500; font-size: 14px; }
+  .side nav a:hover, .side .foot a:hover { background: var(--navy-hover); color: #fff; }
+  .side nav a.on { background: var(--navy-active); color: #fff; }
+  .side .badge { margin-left: auto; background: rgba(255,255,255,.2); border-radius: 999px; padding: 0 8px; font-size: 12px; }
+  .side .badge:empty { display: none; }
+  .side .foot { padding: 8px; border-top: 1px solid rgba(255,255,255,.1); }
+  .collapse-btn { background: none; border: 0; color: rgba(255,255,255,.7); cursor: pointer; padding: 6px; border-radius: 6px; display: inline-flex; }
+  .collapse-btn:hover { background: var(--navy-hover); color: #fff; }
+  body.mini aside.side { width: 64px; }
+  body.mini .side .label, body.mini .side .badge, body.mini .side .logo { display: none; }
+  body.mini .side .brand { justify-content: center; padding: 0; }
+  body.mini .side nav a, body.mini .side .foot a { justify-content: center; }
+  body.mini main { margin-left: 64px; }
+  .topbar { display: none; }
 
-  .btn { background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
-  .btn:hover { background: var(--hover); }
-  .btn.solid { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
-  .btn.solid:hover { opacity: .9; }
+  main { margin-left: 224px; padding: 32px; transition: margin .2s; min-height: 100vh; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .page-head h1 { font-size: 24px; font-weight: 700; margin: 0; }
+  .page-head p { margin: 4px 0 0; color: var(--muted); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-  /* summary */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .stat { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--card); }
-  .stat .k { color: var(--muted); font-size: 12px; }
-  .stat .v { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 500; font-size: 13px; box-shadow: var(--shadow); white-space: nowrap; }
+  .btn:hover { background: var(--row); }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .btn.primary:hover { background: #1d3b6b; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .btn svg.i { width: 15px; height: 15px; }
 
-  /* toolbar */
-  .bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  .search { flex: 1; min-width: 200px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; outline: none; }
-  .search:focus { border-color: #3a3a3a; }
-  .tabs { display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
-  .tabs button { background: none; border: 0; padding: 5px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 13px; }
-  .tabs button.on { background: var(--hover); color: var(--text); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  .card-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px 8px; }
+  .card-h h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .card-h p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .card-b { padding: 8px 20px 20px; }
 
-  /* table */
-  .table { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--card); }
-  .row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 80px 64px 72px 110px 90px; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; }
-  .row:first-child { border-top: 0; }
-  .row:hover { background: var(--hover); }
-  .row.th { cursor: default; color: var(--muted); font-size: 12px; padding-top: 10px; padding-bottom: 10px; }
-  .row.th:hover { background: none; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .name { min-width: 0; }
-  .name .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .name .m { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat { padding: 20px; display: block; transition: box-shadow .15s; }
+  .stat:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+  .stat .top { display: flex; justify-content: space-between; align-items: center; }
+  .chip { padding: 8px; border-radius: 12px; display: inline-flex; }
+  .chip.blue { background: var(--blue-bg); color: var(--blue); } .chip.green { background: #f0fdf4; color: #16a34a; }
+  .chip.purple { background: var(--purple-bg); color: var(--purple); } .chip.orange { background: var(--orange-bg); color: var(--orange); }
+  .stat .n { font-size: 30px; font-weight: 700; margin-top: 16px; line-height: 1.1; }
+  .stat .l { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
   .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .BUY { color: var(--green); } .RESEARCH { color: var(--amber); } .PASS { color: var(--red); }
+  .pill.ch-amazon { background: #fff7ed; color: #c2410c; } .pill.ch-ebay { background: var(--blue-bg); color: var(--blue); }
+  .pill.ch-facebook { background: #eef2ff; color: #4338ca; } .pill.ch-none { background: var(--row); color: var(--muted); }
+  .pill.in_hand { background: var(--row); color: #374151; } .pill.listed { background: var(--blue-bg); color: var(--blue); } .pill.sold { background: var(--green-bg); color: var(--green); }
+  .pill.BUY, .pill.ungated, .pill.active { background: var(--green-bg); color: var(--green); }
+  .pill.RESEARCH, .pill.approval, .pill.paused { background: var(--amber-bg); color: var(--amber); }
+  .pill.PASS, .pill.blocked { background: var(--red-bg); color: var(--red); }
+  .pill.unknown { background: var(--row); color: var(--muted); }
   .pos { color: var(--green); } .neg { color: var(--red); } .dim { color: var(--faint); }
-  .empty { padding: 48px 16px; text-align: center; color: var(--muted); }
 
-  /* drawer */
-  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.6); opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .mini-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--row); cursor: pointer; }
+  .mini-row:first-child { border-top: 0; }
+  .mini-row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .mini-row .s { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-row:hover .t { color: var(--blue); }
+
+  .filters { display: flex; gap: 8px; padding: 16px 16px 0; flex-wrap: wrap; align-items: center; }
+  .search { position: relative; flex: 1; min-width: 200px; }
+  .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--faint); width: 16px; height: 16px; }
+  .search input { width: 100%; padding: 8px 12px 8px 34px; border: 1px solid var(--border); border-radius: 8px; outline: none; background: #fff; }
+  .search input:focus, select:focus, .field input:focus, textarea:focus, form.log input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px #dbeafe; outline: none; }
+  select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  .tabs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .tabs button { border: 0; background: none; padding: 6px 14px; border-radius: 999px; cursor: pointer; color: var(--muted); font-weight: 500; font-size: 13px; }
+  .tabs button:hover { color: var(--text); background: var(--row); }
+  .tabs button.on { background: var(--text); color: #fff; }
+  .tabs .ct { opacity: .6; margin-left: 6px; font-size: 12px; }
+  .results { color: var(--muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .table-wrap { margin: 16px; border: 1px solid var(--border); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 600; color: var(--text); font-size: 13px; padding: 12px 14px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); background: #fff; white-space: nowrap; user-select: none; }
+  th:last-child, td:last-child { border-right: 0; }
+  tbody tr:last-child td { border-bottom: 0; }
+  th.sortable { cursor: pointer; } th.sortable:hover, th.sorted { color: var(--text); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); white-space: nowrap; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover { background: #f8fafc; }
+  td.num, th.num { text-align: right; }
+  td.prod { max-width: 320px; min-width: 220px; }
+  td.prod .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+  .prodcell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .prodcell > div { min-width: 0; }
+  .thumb { width: 32px; height: 32px; border-radius: 8px; background: var(--row) center/contain no-repeat; flex-shrink: 0; border: 1px solid var(--border); display: grid; place-items: center; color: var(--faint); font-size: 11px; font-weight: 600; }
+  td.prod .a { color: var(--faint); font-size: 12px; }
+  .tfoot { padding: 12px 16px; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .empty { padding: 48px 16px; text-align: center; color: var(--muted); white-space: normal; }
+
+  .check { display: flex; gap: 14px; padding: 14px 0; border-top: 1px solid var(--row); }
+  .check:first-child { border-top: 0; }
+  .check .dot { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; margin-top: 1px; }
+  .check .dot.on { background: var(--green-bg); color: var(--green); } .check .dot.off { border: 2px solid var(--border); }
+  .check .dot svg { width: 14px; height: 14px; stroke-width: 3; }
+  .check .h { font-weight: 600; } .check .cost { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .check .w { color: var(--muted); font-size: 13px; } .check .how { font-size: 12px; color: var(--blue); margin-top: 2px; font-family: ui-monospace, Menlo, monospace; word-break: break-word; }
+
+  .scrim { position: fixed; inset: 0; background: rgba(17,24,39,.4); opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 40; }
   .scrim.open { opacity: 1; pointer-events: auto; }
-  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100%); background: var(--bg); border-left: 1px solid var(--border);
-            transform: translateX(100%); transition: transform .2s ease; overflow-y: auto; padding: 24px; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100%); background: #fff; z-index: 50; transform: translateX(100%); transition: transform .2s; overflow-y: auto; box-shadow: -8px 0 24px rgba(0,0,0,.08); }
   .drawer.open { transform: none; }
-  .drawer h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; line-height: 1.35; }
-  .close { position: absolute; top: 16px; right: 16px; }
-  .sec { margin-top: 24px; }
-  .sec h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 0 0 8px; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .grid div { background: var(--card); padding: 10px 12px; }
-  .grid .k { color: var(--muted); font-size: 11px; }
-  .grid .v { font-weight: 500; font-variant-numeric: tabular-nums; }
-  .big { display: flex; align-items: baseline; gap: 10px; margin-top: 16px; }
-  .big .score { font-size: 32px; font-weight: 600; }
-  ul.list { list-style: none; padding: 0; margin: 0; font-size: 13px; }
-  ul.list li { padding: 4px 0; color: #cfcfcf; }
-  ul.list li.warn { color: var(--amber); }
-  .src { display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--card); }
-  .src .r { text-transform: capitalize; }
-  .src .x { color: var(--muted); font-size: 12px; }
-  .links { display: flex; flex-wrap: wrap; gap: 6px; }
-  .links a { border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
-  .links a:hover { color: var(--text); background: var(--hover); }
-  form.log { display: grid; grid-template-columns: 1fr 90px 70px auto; gap: 6px; }
-  form.log input, .modal input, .modal select, .modal textarea { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; outline: none; width: 100%; }
-  .status { display: flex; gap: 6px; flex-wrap: wrap; }
+  .dh { padding: 20px 24px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: #fff; z-index: 1; }
+  .dh .x { position: absolute; right: 16px; top: 16px; }
+  .dh h2 { font-size: 16px; margin: 4px 48px 8px 0; line-height: 1.35; }
+  .db { padding: 8px 24px 32px; }
+  .sec { margin-top: 20px; }
+  .sec h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .kv { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .kv div { padding: 10px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .kv > div:nth-child(3n) { border-right: 0; } .kv > div:nth-last-child(-n+3) { border-bottom: 0; }
+  .kv .k { color: var(--muted); font-size: 11px; padding: 0; border: 0; } .kv .v { font-weight: 600; padding: 0; border: 0; }
+  ul.why { margin: 0; padding-left: 18px; color: #374151; font-size: 13px; }
+  ul.why li { margin: 3px 0; } ul.why li.warn { color: var(--amber); }
+  .src { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+  .src .r { font-weight: 500; }
+  .src .fav { width: 16px; height: 16px; border-radius: 4px; vertical-align: -3px; margin-right: 6px; }
+  .chan { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .chan > div { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .chan > div.best { border-color: #86efac; background: #f0fdf4; }
+  .chan .k { color: var(--muted); font-size: 11px; } .chan .v { font-weight: 600; } .chan .p { font-size: 12px; }
+  .inline-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .inline-form input, .inline-form select { padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; min-width: 0; } .src .x2 { color: var(--muted); font-size: 12px; }
+  .src .note { color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  .src.best { border-color: #86efac; background: #f0fdf4; }
+  .linkrow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .linkrow a { border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+  .linkrow a:hover { color: var(--blue); border-color: #bfdbfe; }
+  form.log { display: grid; grid-template-columns: 1fr 90px 70px auto; gap: 6px; margin-top: 8px; }
+  form.log input, .field input, .field select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg .btn.on-ungated { background: var(--green-bg); border-color: #86efac; color: var(--green); }
+  .seg .btn.on-approval { background: var(--amber-bg); border-color: #fcd34d; color: var(--amber); }
+  .seg .btn.on-blocked { background: var(--red-bg); border-color: #fca5a5; color: var(--red); }
+  .seg .btn.on { background: var(--navy); color: #fff; border-color: var(--navy); }
 
-  /* modal */
-  dialog.modal { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 14px; width: min(480px, calc(100% - 32px)); padding: 20px; }
-  dialog.modal::backdrop { background: rgba(0,0,0,.6); }
-  .modal h2 { font-size: 16px; margin: 0 0 4px; }
-  .modal p { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
-  .modal textarea { min-height: 110px; resize: vertical; }
-  .modal .f { margin-bottom: 10px; }
-  .modal .f label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  dialog { border: 0; border-radius: 14px; padding: 0; width: min(500px, calc(100% - 32px)); box-shadow: 0 20px 50px rgba(0,0,0,.2); }
+  dialog::backdrop { background: rgba(17,24,39,.4); }
+  .dlg { padding: 24px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 18px; } .dlg p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .field { margin-bottom: 12px; } .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+  textarea { min-height: 100px; resize: vertical; }
+  .dlg .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
-  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; display: none; max-width: calc(100% - 32px); }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; display: none; z-index: 60; max-width: calc(100% - 32px); box-shadow: 0 8px 20px rgba(0,0,0,.2); }
 
-  @media (max-width: 720px) {
-    .stats { grid-template-columns: repeat(2, 1fr); }
-    .row { grid-template-columns: minmax(0, 1fr) auto; }
-    .row > :nth-child(n+3) { display: none; }
-    .row.th { display: none; }
-    .row .pill { justify-self: end; }
+  @media (max-width: 1024px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid2 { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 768px) {
+    aside.side { display: none; }
+    body.menu aside.side { display: flex; top: 56px; width: 100%; bottom: auto; }
+    body.menu .side .brand { display: none; }
+    .topbar { display: flex; position: fixed; top: 0; left: 0; right: 0; height: 56px; background: var(--navy); color: #fff; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 31; }
+    main, body.mini main { margin-left: 0; padding: 72px 16px 32px; }
+    .stats, .stats.three { gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); } .stat { padding: 16px; } .stat .n { font-size: 24px; margin-top: 10px; }
     form.log { grid-template-columns: 1fr 1fr; }
+    .chan { grid-template-columns: 1fr; }
+    .table-wrap { margin: 12px; }
+    .page-head h1 { font-size: 20px; }
+    .dh, .db { padding-left: 16px; padding-right: 16px; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="head">
-    <div class="logo">G</div>
-    <div><h1>GhostSignal</h1><div class="sub" id="lastScan">—</div></div>
-    <div class="sp"></div>
-    <button class="btn" id="btnAdd">Add</button>
-    <button class="btn solid" id="btnScan">Scan</button>
-  </div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-dash" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-set" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+    <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-dl" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></symbol>
+  </defs>
+</svg>
 
-  <div class="stats">
-    <div class="stat"><div class="k">Buy now</div><div class="v BUY" id="sBuy">0</div></div>
-    <div class="stat"><div class="k">To research</div><div class="v" id="sResearch">0</div></div>
-    <div class="stat"><div class="k">Products tracked</div><div class="v" id="sProducts">0</div></div>
-    <div class="stat"><div class="k">Network orders</div><div class="v" id="sOrders">0</div></div>
-  </div>
-
-  <div class="bar">
-    <input class="search" id="search" placeholder="Search products">
-    <div class="tabs" id="tabs">
-      <button class="on" data-v="">All</button><button data-v="BUY">Buy</button><button data-v="RESEARCH">Research</button><button data-v="PASS">Pass</button>
-    </div>
-  </div>
-
-  <div class="table" id="table"><div class="empty">Loading…</div></div>
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:10px;font-weight:700"><span class="mark" style="width:28px;height:28px">G</span>GhostSignal</div>
+  <button class="collapse-btn" id="menuBtn" aria-label="Menu"><svg class="i"><use href="#i-menu"/></svg></button>
 </div>
+
+<aside class="side">
+  <div class="brand">
+    <div class="logo"><span class="mark">G</span><span>GhostSignal</span></div>
+    <button class="collapse-btn" id="miniBtn" aria-label="Collapse sidebar"><svg class="i"><use href="#i-left"/></svg></button>
+  </div>
+  <nav id="nav">
+    <a href="#/dashboard" data-p="dashboard"><svg class="i"><use href="#i-dash"/></svg><span class="label">Dashboard</span></a>
+    <a href="#/products" data-p="products"><svg class="i"><use href="#i-box"/></svg><span class="label">Products</span><span class="badge" id="navProducts"></span></a>
+    <a href="#/inventory" data-p="inventory"><svg class="i"><use href="#i-cart"/></svg><span class="label">Inventory</span><span class="badge" id="navInv"></span></a>
+    <a href="#/sellers" data-p="sellers"><svg class="i"><use href="#i-users"/></svg><span class="label">Sellers</span><span class="badge" id="navSellers"></span></a>
+    <a href="#/setup" data-p="setup"><svg class="i"><use href="#i-set"/></svg><span class="label">Setup</span><span class="badge" id="navSetup"></span></a>
+  </nav>
+  <div class="foot">
+    <a href="#" id="scanBtn"><svg class="i"><use href="#i-scan"/></svg><span class="label">Run scan</span></a>
+  </div>
+</aside>
+
+<main id="main"></main>
 
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer"></aside>
 
-<dialog class="modal" id="dlgAdd">
+<dialog id="dlgAdd"><div class="dlg">
   <h2>Add products</h2>
-  <p>Paste ASINs or Amazon links, or upload a file.</p>
-  <div class="f"><textarea id="addText" placeholder="B06W9N8X9H&#10;https://amazon.com/dp/B00NLVM6WK"></textarea></div>
-  <div class="f"><label>Or upload a file</label>
-    <select id="impKind">
-      <option value="orders">Amazon order history</option>
-      <option value="products">Product list CSV (Stealth Seller, Keepa…)</option>
-    </select>
-  </div>
-  <div class="f" id="buyerField"><label>Whose orders?</label><input id="impBuyer" value="me"></div>
-  <div class="f"><input type="file" id="impFile" accept=".csv,.json,.txt" multiple></div>
-  <div class="actions">
-    <button class="btn" onclick="this.closest('dialog').close()">Cancel</button>
-    <button class="btn solid" id="addGo">Add</button>
-  </div>
-</dialog>
+  <p>Paste ASINs or Amazon links, or upload a file. Every ASIN gets pulled out.</p>
+  <div class="field"><textarea id="addText" placeholder="B06W9N8X9H&#10;https://amazon.com/dp/B00NLVM6WK"></textarea></div>
+  <div class="field"><label>Or upload a file</label>
+    <select id="impKind" style="width:100%">
+      <option value="products">Product list CSV (Stealth Seller, Keepa, spreadsheet)</option>
+      <option value="orders">Amazon order history (from the exporter)</option>
+    </select></div>
+  <details style="margin:4px 0 12px"><summary style="cursor:pointer;font-size:13px;font-weight:500">Not on Amazon? Add an item by name</summary>
+    <div class="field" style="margin-top:8px"><input id="itemTitle" placeholder="e.g. Vintage Pyrex bowl set"></div>
+    <div class="inline-form" style="margin-top:0"><input id="itemEbay" type="number" step="0.01" placeholder="eBay sells for $" style="flex:1"><input id="itemFb" type="number" step="0.01" placeholder="Facebook sells for $" style="flex:1"></div>
+  </details>
+  <div class="field" id="buyerField" hidden><label>Whose orders?</label><input id="impBuyer" value="me"></div>
+  <div class="field"><input type="file" id="impFile" accept=".csv,.json,.txt" multiple></div>
+  <div class="foot"><button class="btn" onclick="this.closest('dialog').close()">Cancel</button><button class="btn primary" id="addGo">Add</button></div>
+</div></dialog>
+
+<dialog id="dlgSeller"><div class="dlg">
+  <h2>Track a seller</h2>
+  <p>Paste their Amazon storefront link (it has <b>seller=A…</b> or <b>me=A…</b> in it) or their seller ID.</p>
+  <div class="field"><input id="sellerIn" placeholder="https://www.amazon.com/sp?seller=A2L77EE7U53NWQ"></div>
+  <div class="field"><label>Name (optional)</label><input id="sellerName" placeholder="Menlo Buzz"></div>
+  <div class="foot"><button class="btn" onclick="this.closest('dialog').close()">Cancel</button><button class="btn primary" id="sellerGo">Track</button></div>
+</div></dialog>
 
 <div id="toast"></div>
 
 <script>
-const $ = (s) => document.querySelector(s);
+const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const icon = (n) => `<svg class="i"><use href="#i-${n}"/></svg>`;
 const money = (x) => (typeof x === "number" ? (x < 0 ? "-$" : "$") + Math.abs(x).toFixed(2) : "—");
 const pct = (x) => (typeof x === "number" ? Math.round(x * 100) + "%" : "—");
 const num = (x) => (typeof x === "number" ? (x >= 1000 ? (x / 1000).toFixed(x >= 10000 ? 0 : 1) + "k" : String(x)) : "—");
 const cls = (x) => (typeof x !== "number" ? "dim" : x > 0 ? "pos" : "neg");
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const LABEL = { BUY: "Buy", RESEARCH: "Research", PASS: "Pass" };
-const GATED = { ungated: ["Yes", "BUY"], approval: ["Needs approval", "RESEARCH"], blocked: ["No", "PASS"] };
-function canSell(p) {
-  if (GATED[p.gated]) return `<span class="${GATED[p.gated][1]}">${GATED[p.gated][0]}</span>`;
-  const risk = p.enrichment?.gating_risk;
-  return risk === "high" ? `<span class="RESEARCH">Likely gated?</span>` : `<span class="dim">Not checked</span>`;
-}
-let rows = [], verdict = "", query = "", openAsin = null, timer;
+const GATED = { ungated: "Ungated", approval: "Needs approval", blocked: "Can't sell", unknown: "Not checked" };
+let routeSeq = 0;
+const paint = (seq, html) => { if (seq === routeSeq) $("#main").innerHTML = html; return seq === routeSeq; };
+let products = [], view = { verdict: "", q: "", gated: "", sort: "score", dir: -1 }, timer;
 
-function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3000); }
+function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3500); }
 async function api(path, body) {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
@@ -189,131 +300,340 @@ function ago(iso) {
   const m = (Date.now() - new Date(iso)) / 6e4;
   return m < 60 ? Math.max(1, Math.round(m)) + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
 }
-
-async function load() {
-  const all = await api("/api/products");
-  const s = await api("/api/stats");
-  $("#sBuy").textContent = all.filter((r) => r.verdict === "BUY").length;
-  $("#sResearch").textContent = all.filter((r) => r.verdict === "RESEARCH").length;
-  $("#sProducts").textContent = s.products;
-  $("#sOrders").textContent = s.orders;
-  $("#lastScan").textContent = "Last scan " + ago(s.last_run);
-  rows = all;
-  render();
+function gatedPill(p) {
+  if (p.asin?.startsWith("GS")) return `<span class="pill ch-none">Not on Amazon</span>`;
+  if (p.gated && p.gated !== "unknown") return `<span class="pill ${p.gated}">${GATED[p.gated]}</span>`;
+  return p.enrichment?.gating_risk === "high" ? `<span class="pill approval">Likely gated?</span>` : `<span class="pill unknown">Not checked</span>`;
 }
 
-function render() {
-  const q = query.toLowerCase();
-  const list = rows.filter((r) => (!verdict || r.verdict === verdict) && (!q || `${r.asin} ${r.title} ${r.brand}`.toLowerCase().includes(q)));
-  if (!rows.length) { $("#table").innerHTML = `<div class="empty">No products yet. Click <b>Add</b> to paste ASINs or upload your Amazon orders.</div>`; return; }
-  $("#table").innerHTML = `<div class="row th"><div>Product</div><div>Signal</div><div class="num">Profit</div><div class="num">ROI</div><div class="num">Sales/mo</div><div>Can sell</div><div>Source</div></div>` +
-    (list.length ? list.map((r) => `
-    <div class="row" data-asin="${r.asin}">
-      <div class="name"><div class="t">${esc(r.title || r.asin)}</div><div class="m">${esc(r.brand || "")}${r.brand ? " · " : ""}${r.asin}</div></div>
-      <div><span class="pill ${r.verdict}">${LABEL[r.verdict]} · ${r.score}</span></div>
-      <div class="num ${cls(r.economics.profit)}">${money(r.economics.profit)}</div>
-      <div class="num ${cls(r.economics.roi)}">${pct(r.economics.roi)}</div>
-      <div class="num">${num(r.snapshot?.monthly_sold)}</div>
-      <div>${canSell(r)}</div>
-      <div class="${r.best_source ? "" : "dim"}" style="text-transform:capitalize">${esc(r.best_source?.retailer || "—")}</div>
-    </div>`).join("") : `<div class="empty">Nothing matches.</div>`);
+const CH = { amazon: "Amazon", ebay: "eBay", facebook: "Facebook" };
+const chPill = (c) => c ? `<span class="pill ch-${c}">${CH[c]}</span>` : `<span class="pill ch-none">Not listed</span>`;
+const domain = (r) => ({ samsclub: "samsclub.com", homedepot: "homedepot.com", wholefoods: "wholefoodsmarket.com", traderjoes: "traderjoes.com", bjs: "bjs.com" }[r] || r + ".com");
+const fav = (r) => `<img class="fav" alt="" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain(r))}&sz=32">`;
+const thumb = (p) => p.image_url ? `<span class="thumb" style="background-image:url('${esc(p.image_url)}')"></span>` : `<span class="thumb">${esc((p.title || p.asin || "?")[0])}</span>`;
+
+/* ---------- pages ---------- */
+async function loadProducts() { products = await api("/api/products"); $("#navProducts").textContent = products.length || ""; }
+const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><div class="top"><span class="chip ${c}">${icon(ic)}</span><svg class="i" style="color:#d1d5db;width:16px"><use href="#i-arrow"/></svg></div><div class="n">${n}</div><div class="l">${l}</div></a>`;
+
+async function pageDashboard() {
+  const seq = routeSeq;
+  const [, stats, changes, setup] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/setup")]);
+  const buys = products.filter((p) => p.verdict === "BUY").length, res = products.filter((p) => p.verdict === "RESEARCH").length;
+  const top = products.filter((p) => p.verdict !== "PASS").slice(0, 8);
+  const done = setup.items.filter((i) => i.done).length;
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Dashboard</h1><p>Last scan ${ago(stats.last_run)}</p></div>
+      <div class="actions"><button class="btn" onclick="openAdd()">${icon("plus")}Add products</button><button class="btn primary" onclick="scan()">${icon("scan")}Run scan</button></div></div>
+    <div class="stats">
+      ${statCard("green", "cart", buys, "Buy now", "#/products?v=BUY")}
+      ${statCard("orange", "eye", res, "To research", "#/products?v=RESEARCH")}
+      ${statCard("blue", "box", stats.products, "Products tracked", "#/products?v=")}
+      ${statCard("purple", "cart", stats.inventory_units, `In inventory · ${money(stats.inventory_cost)}`, "#/inventory")}
+    </div>
+    <div class="grid2">
+      <div class="card"><div class="card-h"><div><h2>Top opportunities</h2><p>Best scores right now</p></div><a class="btn sm" href="#/products?v=">View all</a></div>
+        <div class="card-b">${top.length ? top.map((p) => `
+          <div class="mini-row" data-asin="${p.asin}">
+            <span class="pill ${p.verdict}">${p.score}</span>
+            <div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${money(p.economics.profit)} profit · ${pct(p.economics.roi)} ROI · ${num(p.snapshot?.monthly_sold)}/mo · ${esc(p.best_source?.retailer || "no store yet")}</div></div>
+            ${gatedPill(p)}
+          </div>`).join("") : `<div class="empty">No products yet. Click <b>Add products</b>.</div>`}</div></div>
+      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
+        <div class="card"><div class="card-h"><div><h2>Moved up</h2><p>Got better on the latest scan</p></div></div>
+          <div class="card-b">${changes.length ? changes.map((c) => `
+            <div class="mini-row" data-asin="${c.asin}"><div style="flex:1;min-width:0"><div class="t">${esc(c.title || c.asin)}</div>
+            <div class="s">${LABEL[c.from]} → <b class="${c.to === "BUY" ? "pos" : ""}">${LABEL[c.to]}</b> · ${ago(c.at)}</div></div></div>`).join("") : `<div class="hint">Nothing yet. Products that get better show up here.</div>`}</div></div>
+        <div class="card"><div class="card-h"><div><h2>Setup</h2><p>${done} of ${setup.items.length} done</p></div><a class="btn sm" href="#/setup">Open</a></div>
+          <div class="card-b"><div style="height:8px;background:var(--row);border-radius:99px;overflow:hidden"><div style="height:100%;width:${(done / setup.items.length) * 100}%;background:var(--navy)"></div></div>
+          <div class="hint" style="margin-top:8px">Next: ${esc(setup.items.find((i) => !i.done)?.label || "All set")}</div></div></div>
+      </div>
+    </div>`)) return;
 }
 
+const COLS = [
+  ["title", "Product", (p) => (p.title || "").toLowerCase()], ["score", "Signal", (p) => p.score], ["gated", "Can sell", (p) => p.gated],
+  ["sell", "Sell", (p) => p.economics.sale_price], ["cost", "Cost", (p) => p.economics.cost], ["max", "Max cost", (p) => p.economics.max_cost],
+  ["profit", "Profit", (p) => p.economics.profit], ["roi", "ROI", (p) => p.economics.roi], ["sold", "Sales/mo", (p) => p.snapshot?.monthly_sold],
+  ["rank", "Rank", (p) => p.snapshot?.sales_rank], ["offers", "Sellers", (p) => p.snapshot?.offer_count], ["net", "Network", (p) => p.orders.orders || null],
+  ["channel", "Sell on", (p) => p.economics.best_channel || ""],
+  ["store", "Best store", (p) => p.best_source?.retailer || ""], ["checked", "Updated", (p) => p.snapshot?.captured_at || ""],
+];
+const NUMCOLS = new Set(["sell", "cost", "max", "profit", "roi", "sold", "rank", "offers", "net"]);
+
+async function pageProducts(params) {
+  const seq = routeSeq;
+  if (params.has("v")) view.verdict = params.get("v");
+  await loadProducts();
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Products</h1><p>Every product you're watching. Click a row for details.</p></div>
+      <div class="actions">
+        <button class="btn" onclick="copyAsins()">${icon("copy")}Copy ASINs</button>
+        <a class="btn" href="/api/export.csv">${icon("dl")}Export</a>
+        <button class="btn primary" onclick="openAdd()">${icon("plus")}Add products</button></div></div>
+    <div class="card">
+      <div class="filters">
+        <div class="search"><svg class="i"><use href="#i-search"/></svg><input id="q" placeholder="Search product, brand, ASIN" value="${esc(view.q)}"></div>
+        <div class="tabs" id="vtabs">${["", "BUY", "RESEARCH", "PASS"].map((v) => `<button data-v="${v}" class="${view.verdict === v ? "on" : ""}">${v ? LABEL[v] : "All"}<span class="ct">${v ? products.filter((p) => p.verdict === v).length : products.length}</span></button>`).join("")}</div>
+        <span class="results" id="results"></span>
+        <select id="gsel"><option value="">Can sell: any</option>${Object.entries(GATED).map(([k, l]) => `<option value="${k}" ${view.gated === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      </div>
+      <div class="table-wrap"><table><thead><tr id="thead"></tr></thead><tbody id="tb"></tbody></table></div>
+      <div class="tfoot" id="tfoot"></div>
+    </div>`)) return;
+  $("#q").oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => { view.q = e.target.value.trim(); renderTable(); }, 150); };
+  $("#vtabs").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; view.verdict = b.dataset.v; [...$("#vtabs").children].forEach((x) => x.classList.toggle("on", x === b)); renderTable(); };
+  $("#gsel").onchange = (e) => { view.gated = e.target.value; renderTable(); };
+  $("#thead").onclick = (e) => {
+    const th = e.target.closest("th"); if (!th) return;
+    view.dir = view.sort === th.dataset.k ? -view.dir : (["title", "store", "gated"].includes(th.dataset.k) ? 1 : -1);
+    view.sort = th.dataset.k; renderTable();
+  };
+  renderTable();
+}
+
+function renderTable() {
+  $("#thead").innerHTML = COLS.map(([k, l]) => `<th data-k="${k}" class="sortable ${NUMCOLS.has(k) ? "num" : ""} ${view.sort === k ? "sorted" : ""}">${l}${view.sort === k ? (view.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("");
+  const q = view.q.toLowerCase(), get = COLS.find((c) => c[0] === view.sort)[2];
+  const list = products
+    .filter((p) => (!view.verdict || p.verdict === view.verdict) && (!view.gated || p.gated === view.gated)
+      && (!q || `${p.asin} ${p.title} ${p.brand}`.toLowerCase().includes(q)))
+    .sort((a, b) => {
+      const x = get(a), y = get(b);
+      if (x == null || x === "") return y == null || y === "" ? 0 : 1;
+      if (y == null || y === "") return -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * view.dir;
+    });
+  $("#tb").innerHTML = list.length ? list.map((p) => {
+    const e = p.economics, s = p.snapshot || {};
+    return `<tr class="click" data-asin="${p.asin}">
+      <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${p.asin}</div></div></div></td>
+      <td><span class="pill ${p.verdict}">${LABEL[p.verdict]} ${p.score}</span></td>
+      <td>${gatedPill(p)}</td>
+      <td class="num">${money(e.sale_price)}</td><td class="num">${money(e.cost)}</td><td class="num">${money(e.max_cost)}</td>
+      <td class="num ${cls(e.profit)}">${money(e.profit)}</td><td class="num ${cls(e.roi)}">${pct(e.roi)}</td>
+      <td class="num">${num(s.monthly_sold)}</td><td class="num">${num(s.sales_rank)}</td><td class="num">${s.offer_count ?? "—"}</td>
+      <td class="num">${p.orders.orders || "—"}</td>
+      <td>${e.best_channel ? chPill(e.best_channel) : "—"}</td>
+      <td>${p.best_source ? fav(p.best_source.retailer) + esc(p.best_source.retailer) : "—"}</td>
+      <td class="dim">${ago(s.captured_at)}</td></tr>`;
+  }).join("") : `<tr><td colspan="${COLS.length}"><div class="empty">${products.length ? "Nothing matches these filters." : "No products yet. Click Add products."}</div></td></tr>`;
+  $("#results").textContent = `${list.length} results`;
+  $("#tfoot").innerHTML = `<span>Showing ${list.length} of ${products.length}</span><span>Click a column header to sort</span>`;
+}
+
+const INV = { in_hand: "In hand", listed: "Listed", sold: "Sold" };
+let invTab = "";
+async function pageInventory() {
+  const seq = routeSeq;
+  const [rows, stats] = await Promise.all([api("/api/inventory"), api("/api/stats")]);
+  $("#navInv").textContent = rows.filter((r) => r.status !== "sold").length || "";
+  const tabs = [["", "All"], ["amazon", "Amazon"], ["ebay", "eBay"], ["facebook", "Facebook"], ["none", "Not listed"], ["sold", "Sold"]];
+  const match = (r, t) => !t || (t === "none" ? !r.channel && r.status !== "sold" : t === "sold" ? r.status === "sold" : r.channel === t && r.status !== "sold");
+  const list = rows.filter((r) => match(r, invTab));
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Inventory</h1><p>What you bought and where it's listed. Same product list for every channel, so anything can move between Amazon, eBay and Facebook.</p></div>
+      <div class="actions"><a class="btn primary" href="#/products?v=">${icon("plus")}Add from Products</a></div></div>
+    <div class="stats three">
+      ${statCard("blue", "box", stats.inventory_units, "Units on hand", "#/inventory")}
+      ${statCard("orange", "cart", money(stats.inventory_cost), "Money tied up", "#/inventory")}
+      ${statCard("green", "check", money(stats.realized_profit), "Profit from sales", "#/inventory")}
+    </div>
+    <div class="card">
+      <div class="filters"><div class="tabs" id="itabs">${tabs.map(([k, l]) => `<button data-t="${k}" class="${invTab === k ? "on" : ""}">${l}<span class="ct">${rows.filter((r) => match(r, k)).length}</span></button>`).join("")}</div>
+        <span class="results">${list.length} results</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Cost each</th><th>Bought at</th><th>Channel</th><th class="num">List price</th><th>Status</th><th class="num">Profit</th><th></th></tr></thead>
+      <tbody>${list.length ? list.map((r) => `<tr>
+        <td class="prod"><div class="prodcell click" data-asin="${r.asin}" style="cursor:pointer">${thumb(r)}<div><div class="t">${esc(r.title || r.asin)}</div><div class="a">${r.asin} · ${ago(r.bought_at)}</div></div></div></td>
+        <td class="num">${r.status === "sold" ? r.sold_qty : r.qty}</td><td class="num">${money(r.unit_cost)}</td><td>${r.store ? fav(r.store) + esc(r.store) : "—"}</td>
+        <td>${chPill(r.channel)}</td><td class="num">${r.status === "sold" ? money(r.sold_price) : money(r.list_price)}</td>
+        <td><span class="pill ${r.status}">${INV[r.status]}</span></td>
+        <td class="num ${cls(r.profit)}">${r.profit != null ? money(r.profit) : "—"}</td>
+        <td class="num">${r.status === "sold" ? `<button class="btn sm" data-inv="${r.id}" data-act="del">Remove</button>` : `
+          <select data-inv="${r.id}" data-act="channel" style="padding:4px 6px;font-size:12px"><option value="">Move to…</option>${Object.entries(CH).filter(([k]) => k !== r.channel).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
+          <button class="btn sm" data-inv="${r.id}" data-act="list">${r.list_price ? "Price" : "List"}</button>
+          <button class="btn sm" data-inv="${r.id}" data-act="sold">Sold</button>`}</td></tr>`).join("")
+        : `<tr><td colspan="9"><div class="empty">${rows.length ? "Nothing in this tab." : "Nothing bought yet. Open a product and use <b>I bought this</b>."}</div></td></tr>`}</tbody></table></div>
+    </div>`)) return;
+  $("#itabs").onclick = (e) => { const b = e.target.closest("button"); if (b) { invTab = b.dataset.t; pageInventory(); } };
+  const upd = async (id, body, msg) => { try { await api(`/api/inventory/${id}`, body); toast(msg); pageInventory(); } catch (err) { toast(err.message); } };
+  $("#main").querySelectorAll("[data-act=channel]").forEach((sel) => (sel.onchange = () => sel.value && upd(sel.dataset.inv, { channel: sel.value, status: "in_hand", list_price: null }, `Moved to ${CH[sel.value]}`)));
+  $("#main").querySelectorAll("button[data-inv]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.inv, act = b.dataset.act;
+    if (act === "del") { if (confirm("Remove this sold record?")) upd(id, { delete: true }, "Removed"); return; }
+    const v = prompt(act === "sold" ? "Sold for how much each? ($)" : "List price ($)");
+    if (v === null || v === "" || isNaN(Number(v))) return;
+    upd(id, act === "sold" ? { status: "sold", sold_price: Number(v) } : { list_price: Number(v), status: "listed" }, act === "sold" ? "Marked sold" : "Listed");
+  }));
+}
+
+async function pageSellers() {
+  const seq = routeSeq;
+  const list = await api("/api/sellers");
+  $("#navSellers").textContent = list.length || "";
+  const active = list.filter((s) => s.status === "active").length;
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Tracked sellers</h1><p>Storefronts you're watching. Their products land in Products automatically.</p></div>
+      <div class="actions"><button class="btn" onclick="refreshSellers(this)">${icon("refresh")}Refresh</button><button class="btn primary" onclick="$('#dlgSeller').showModal()">${icon("plus")}Add seller</button></div></div>
+    <div class="stats three">
+      ${statCard("purple", "users", list.length, "Sellers", "#/sellers")}
+      ${statCard("green", "check", active, "Active", "#/sellers")}
+      ${statCard("blue", "box", list.reduce((a, s) => a + s.products, 0), "Products from sellers", "#/products?v=")}
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table><thead><tr><th>Storefront</th><th>Status</th><th>Added</th><th>Last pulled</th><th class="num">Products</th><th class="num">New</th><th class="num">Buys</th><th></th></tr></thead>
+      <tbody>${list.length ? list.map((s) => `<tr>
+        <td><div style="font-weight:500">${esc(s.name || s.seller_id)}</div><div style="font-size:12px"><a class="dim" href="https://www.amazon.com/sp?seller=${s.seller_id}" target="_blank" rel="noopener">${s.seller_id} ↗</a></div></td>
+        <td><span class="pill ${s.status}">${cap(s.status)}</span></td>
+        <td>${new Date(s.added_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td>
+        <td class="dim">${s.last_pull ? ago(s.last_pull) : "not yet"}</td>
+        <td class="num">${s.products}</td>
+        <td class="num">${s.new_count ? `<span class="pill BUY">${s.new_count}</span>` : "—"}</td>
+        <td class="num">${s.buys || "—"}</td>
+        <td class="num"><button class="btn sm" data-sid="${s.seller_id}" data-act="${s.status === "active" ? "paused" : "active"}">${s.status === "active" ? "Pause" : "Resume"}</button>
+          <button class="btn sm" data-sid="${s.seller_id}" data-act="remove">Remove</button></td></tr>`).join("")
+        : `<tr><td colspan="8"><div class="empty">No sellers yet. On any Amazon listing, click a seller's name, copy that page's link, then click <b>Add seller</b>.</div></td></tr>`}</tbody></table></div>
+      <div class="tfoot"><span>Pulling a seller's products needs a Keepa key (see Setup). Sellers you add now get pulled once it's connected.</span></div>
+    </div>`)) return;
+  $("#main").querySelectorAll("button[data-sid]").forEach((b) => (b.onclick = async () => {
+    if (b.dataset.act === "remove") await api(`/api/sellers/${b.dataset.sid}/remove`, {});
+    else await api(`/api/sellers/${b.dataset.sid}/status`, { status: b.dataset.act });
+    pageSellers();
+  }));
+}
+
+async function pageSetup() {
+  const seq = routeSeq;
+  const s = await api("/api/setup");
+  $("#navSetup").textContent = s.items.filter((i) => !i.done).length || "";
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Setup</h1><p>Nothing here is required to start. Each one you connect does more of the work for you.</p></div></div>
+    <div class="grid2">
+      <div class="card"><div class="card-h"><div><h2>Connections</h2><p>${s.items.filter((i) => i.done).length} of ${s.items.length} done · keys go in the <b>.env</b> file</p></div></div>
+        <div class="card-b">${s.items.map((i) => `
+          <div class="check"><span class="dot ${i.done ? "on" : "off"}">${i.done ? icon("check") : ""}</span>
+            <div style="min-width:0"><div class="h">${esc(i.label)}${i.cost ? `<span class="cost">${esc(i.cost)}</span>` : ""}</div>
+            <div class="w">${esc(i.what)}</div>${i.done ? "" : `<div class="how">${esc(i.how)}</div>`}</div></div>`).join("")}</div></div>
+      <div class="card" style="align-self:start"><div class="card-h"><div><h2>Your area</h2><p>Store prices are looked up near here.</p></div></div>
+        <div class="card-b">
+          <div class="field"><input id="loc" value="${esc(s.location || "")}" placeholder="Detroit, Michigan, United States"></div>
+          <div class="hint">Format: City, State, United States</div>
+          <div style="margin-top:12px"><button class="btn primary" id="locSave">Save</button></div>
+        </div></div>
+    </div>`)) return;
+  $("#locSave").onclick = async () => { await api("/api/settings", { location: $("#loc").value }); toast("Area saved"); pageSetup(); };
+}
+
+/* ---------- product drawer ---------- */
 function drawer(p) {
   const e = p.economics, s = p.snapshot || {};
-  const cell = (k, v, c = "") => `<div><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`;
-  const stores = (p.enrichment?.likely_retailers?.length ? p.enrichment.likely_retailers : ["walmart", "target", "costco", "samsclub"])
-    .concat(["walmart", "target", "costco", "samsclub", "google"]).filter((k, i, a) => p.links.retail[k] && a.indexOf(k) === i).slice(0, 6);
+  const kv = (k, v, c = "") => `<div><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`;
+  const stores = ["walmart", "target", "costco", "samsclub", "google"].concat(p.enrichment?.likely_retailers || []).filter((k, i, a) => p.links.retail[k] && a.indexOf(k) === i).slice(0, 7);
+  const ch = e.channels || {}, notAmazon = p.asin.startsWith("GS");
+  const chanCard = (k) => { const c = ch[k]; return `<div class="${e.best_channel === k ? "best" : ""}"><div class="k">${CH[k]}${e.best_channel === k ? " · best" : ""}</div>
+    <div class="v">${c ? money(c.price) : "—"}</div><div class="p ${cls(c?.profit)}">${c?.profit != null ? money(c.profit) + " profit" : c ? "add a cost" : "no price yet"}</div></div>`; };
+  const gatedHtml = `<div class="sec"><h3>Can you sell it on Amazon?</h3>
+        <div class="seg">${[["ungated", "Yes"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
+          `<button class="btn sm ${p.gated === k ? "on-" + k : ""}" data-gated="${k}">${l}</button>`).join("")}
+          <a class="btn sm" href="${p.links.sellercentral}" target="_blank" rel="noopener">Check in Seller Central ↗</a></div>
+        <div class="hint">${p.eligibility ? `Set ${p.eligibility.source === "spapi" ? "by Amazon" : "by you"} ${ago(p.eligibility.checked_at)}${p.eligibility.reason ? " · " + esc(p.eligibility.reason) : ""}` : "Not checked yet. Check, then tap the answer."}
+          ${p.eligibility?.approval_url ? ` · <a href="${esc(p.eligibility.approval_url)}" target="_blank" rel="noopener" style="color:var(--blue)">Request approval</a>` : ""}</div></div>`;
   $("#drawer").innerHTML = `
-    <button class="btn close" id="closeBtn">Close</button>
-    <div class="sub">${esc(p.brand || "")}${p.brand ? " · " : ""}${p.asin}</div>
-    <h2 style="padding-right:64px">${esc(p.title || p.asin)}</h2>
-    <div class="big"><span class="score ${p.verdict}">${p.score}</span><span class="pill ${p.verdict}">${LABEL[p.verdict]}</span></div>
+    <div class="dh"><button class="btn sm x" id="closeBtn" aria-label="Close">${icon("x")}</button>
+      <div class="dim" style="font-size:12px">${esc(p.brand || "")}${p.brand ? " · " : ""}${p.asin}</div>
+      <h2>${esc(p.title || p.asin)}</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${p.verdict}">${LABEL[p.verdict]} · ${p.score}/100</span>${gatedPill(p)}</div></div>
+    <div class="db">
+      <div class="sec"><div class="kv">
+        ${kv("Sell price", money(e.sale_price))}${kv("Your cost", money(e.cost))}${kv("Max cost", money(e.max_cost))}
+        ${kv("Profit", money(e.profit), cls(e.profit))}${kv("ROI", pct(e.roi), cls(e.roi))}${kv("Amazon fees", money((e.referral_fee || 0) + (e.fba_fee || 0) || null))}
+        ${kv("Sales / month", num(s.monthly_sold))}${kv("Rank", num(s.sales_rank))}${kv("Sellers", s.offer_count ?? "—")}
+      </div></div>
 
-    <div class="sec"><div class="grid">
-      ${cell("Sell price", money(e.sale_price))}${cell("Your cost", money(e.cost))}${cell("Max cost", money(e.max_cost))}
-      ${cell("Profit", money(e.profit), cls(e.profit))}${cell("ROI", pct(e.roi), cls(e.roi))}${cell("Fees", money((e.referral_fee || 0) + (e.fba_fee || 0) || null))}
-      ${cell("Sales/mo", num(s.monthly_sold))}${cell("Rank", num(s.sales_rank))}${cell("Sellers", s.offer_count ?? "—")}
-    </div></div>
+      <div class="sec"><h3>Where it sells</h3>
+        <div class="chan">${["amazon", "ebay", "facebook"].map(chanCard).join("")}</div>
+        <form class="inline-form" id="chanForm"><select name="channel"><option value="ebay">eBay sells for</option><option value="facebook">Facebook sells for</option></select>
+          <input name="price" type="number" step="0.01" placeholder="$" required style="width:90px"><button class="btn sm">Save</button></form>
+        <div class="linkrow" style="margin-top:8px"><a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a><a href="${p.links.ebay_active}" target="_blank" rel="noopener">eBay active ↗</a><a href="${p.links.facebook}" target="_blank" rel="noopener">Facebook Marketplace ↗</a></div></div>
 
-    <div class="sec"><h3>Can you sell it?</h3>
-      <div class="status">
-        ${[["ungated", "Yes, ungated"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
-          `<button class="btn ${p.gated === k ? GATED[k][1] : ""}" data-gated="${k}" ${p.gated === k ? 'style="border-color:currentColor"' : ""}>${l}</button>`).join("")}
-        <a class="btn" href="${p.links.sellercentral}" target="_blank" rel="noopener">Check in Seller Central</a>
-      </div>
-      <div class="sub" style="margin-top:6px">${p.eligibility ? `Set ${p.eligibility.source === "spapi" ? "by Amazon" : "by you"} ${ago(p.eligibility.checked_at)}${p.eligibility.reason ? " · " + esc(p.eligibility.reason) : ""}` : "Not checked yet — tap one after you check."}
-        ${p.eligibility?.approval_url ? ` · <a href="${esc(p.eligibility.approval_url)}" target="_blank" rel="noopener" style="text-decoration:underline">Request approval</a>` : ""}</div>
-    </div>
+      ${notAmazon ? "" : gatedHtml}
 
-    <div class="sec"><h3>Why</h3><ul class="list">
-      ${p.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}
-      ${p.flags.map((f) => `<li class="warn">${esc(f)}</li>`).join("")}
-      ${p.enrichment?.notes ? `<li>${esc(p.enrichment.notes)}</li>` : ""}
-    </ul></div>
+      <div class="sec"><h3>Why this score</h3><ul class="why">
+        ${p.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}${p.flags.map((f) => `<li class="warn">${esc(f)}</li>`).join("")}
+        ${p.enrichment?.notes ? `<li>${esc(p.enrichment.notes)}</li>` : ""}</ul></div>
 
-    <div class="sec"><h3>Where to buy</h3>
-      ${p.sources.map((x) => `<a class="src" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
-        <span><span class="r">${esc(x.retailer)}</span>${x.pack_qty > 1 ? ` <span class="x">× ${x.pack_qty}</span>` : ""}${x.promo ? ` <span class="x">· ${esc(x.promo)}</span>` : ""}</span>
-        <span>${money(x.price)}</span></a>`).join("") || `<div class="sub" style="margin-bottom:8px">No prices logged yet.</div>`}
-      <div class="links" style="margin:10px 0">${stores.map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">Search ${esc(p.links.retail[k].name)}</a>`).join("")}</div>
-      <form class="log" id="logForm">
-        <input name="retailer" placeholder="Store" required list="stores">
-        <input name="price" type="number" step="0.01" placeholder="Price" required>
-        <input name="pack_qty" type="number" min="1" placeholder="Qty">
-        <button class="btn">Save</button>
-      </form>
-    </div>
+      <div class="sec"><h3 style="display:flex;justify-content:space-between;align-items:center">Where to buy <button class="btn sm" id="findPrices">${icon("search")}Find store prices</button></h3>
+        ${p.sources.map((x) => `<a class="src ${p.best_source?.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
+          <div style="min-width:0"><div>${fav(x.retailer)}<span class="r">${esc(domain(x.retailer))}</span>${x.pack_qty > 1 ? ` <span class="x2">× ${x.pack_qty}</span>` : ""}${x.promo ? ` <span class="x2">· ${esc(x.promo)}</span>` : ""}</div>
+          ${x.note ? `<div class="note">${esc(x.note)}</div>` : ""}</div><b>${money(x.price)}</b></a>`).join("") || `<div class="hint" style="margin-bottom:8px">No store prices yet.</div>`}
+        <div class="linkrow" style="margin:10px 0">${stores.map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">${esc(p.links.retail[k].name)} ↗</a>`).join("")}</div>
+        <form class="log" id="logForm"><input name="retailer" placeholder="Store" required list="storeList"><input name="price" type="number" step="0.01" placeholder="Price" required><input name="pack_qty" type="number" min="1" placeholder="Qty"><button class="btn">Save</button></form>
+        <div class="hint">Qty = how many store units make one Amazon listing (2 for a 2-pack).</div></div>
 
-    <div class="sec"><h3>Check</h3><div class="links">
-      <a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon</a>
-      <a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa</a>
-      <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold</a>
-    </div></div>
+      <div class="sec"><h3>I bought this</h3>
+        ${p.inventory.map((i) => `<div class="src"><div><div>${i.qty} × ${money(i.unit_cost)} ${i.store ? "from " + esc(i.store) : ""}</div><div class="x2">${ago(i.bought_at)}</div></div><div>${chPill(i.channel)} <span class="pill ${i.status}">${INV[i.status]}</span></div></div>`).join("")}
+        <form class="inline-form" id="buyForm"><input name="qty" type="number" min="1" value="1" style="width:60px" title="Quantity"><input name="unit_cost" type="number" step="0.01" placeholder="Cost each $" style="width:100px" required>
+          <input name="store" placeholder="Store" list="storeList" style="width:100px"><select name="channel"><option value="">Sell on…</option><option value="amazon">Amazon</option><option value="ebay">eBay</option><option value="facebook">Facebook</option></select>
+          <button class="btn sm primary">Add to inventory</button></form></div>
 
-    <div class="sec"><h3>Mark as</h3><div class="status">
-      ${["buy", "research", "watch", "pass", "dead"].map((st) => `<button class="btn" data-status="${st}" ${p.status === st ? 'style="border-color:#555"' : ""}>${st[0].toUpperCase() + st.slice(1)}</button>`).join("")}
-    </div></div>`;
-  $("#closeBtn").onclick = close;
+      <div class="sec"><h3>Research</h3><div class="linkrow">
+        ${p.links.amazon ? `<a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon ↗</a><a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa ↗</a><a href="${p.links.offers}" target="_blank" rel="noopener">Offers ↗</a>` : `<a href="${p.links.amazon_search}" target="_blank" rel="noopener">Search Amazon ↗</a>`}
+        <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a></div></div>
+
+      <div class="sec"><h3>Status</h3><div class="seg">
+        ${["watch", "buy", "research", "pass", "dead"].map((st) => `<button class="btn sm ${p.status === st ? "on" : ""}" data-status="${st}">${cap(st)}</button>`).join("")}</div>
+        <div class="hint">Pass keeps it in history. Dead hides it.</div></div>
+    </div>`;
+  $("#closeBtn").onclick = closeDrawer;
+  const refresh = async (np, msg) => { drawer(np); toast(msg); await loadProducts(); rerender(); };
   $("#logForm").onsubmit = async (ev) => {
     ev.preventDefault();
     const d = Object.fromEntries([...new FormData(ev.target)].filter(([, v]) => v !== ""));
     d.price = Number(d.price); if (d.pack_qty) d.pack_qty = Number(d.pack_qty);
-    try { drawer(await api(`/api/products/${p.asin}/source`, d)); toast("Price saved"); load(); } catch (err) { toast(err.message); }
+    try { await refresh(await api(`/api/products/${p.asin}/source`, d), "Price saved"); } catch (err) { toast(err.message); }
   };
-  $("#drawer").querySelectorAll("[data-gated]").forEach((b) => (b.onclick = async () => {
-    drawer(await api(`/api/products/${p.asin}/gated`, { status: b.dataset.gated })); toast("Saved"); load();
-  }));
+  $("#chanForm").onsubmit = async (ev) => {
+    ev.preventDefault(); const d = Object.fromEntries(new FormData(ev.target)); d.price = Number(d.price);
+    try { await refresh(await api(`/api/products/${p.asin}/channel`, d), `${CH[d.channel]} price saved`); } catch (err) { toast(err.message); }
+  };
+  $("#buyForm").onsubmit = async (ev) => {
+    ev.preventDefault(); const d = Object.fromEntries(new FormData(ev.target));
+    try { await refresh(await api(`/api/products/${p.asin}/inventory`, d), "Added to inventory"); } catch (err) { toast(err.message); }
+  };
+  $("#findPrices").onclick = async (ev) => {
+    const b = ev.currentTarget; b.disabled = true; b.textContent = "Searching…";
+    try { await refresh(await api(`/api/products/${p.asin}/prices`, {}), "Store prices updated. Check pack sizes match."); }
+    catch (err) { toast(err.message); b.disabled = false; b.innerHTML = `${icon("search")}Find store prices`; }
+  };
+  $("#drawer").querySelectorAll("[data-gated]").forEach((b) => (b.onclick = async () => refresh(await api(`/api/products/${p.asin}/gated`, { status: b.dataset.gated }), "Saved")));
   $("#drawer").querySelectorAll("[data-status]").forEach((b) => (b.onclick = async () => {
     await api(`/api/products/${p.asin}/status`, { status: b.dataset.status });
-    toast("Marked " + b.dataset.status); close(); load();
+    toast("Marked " + b.dataset.status); closeDrawer(); await loadProducts(); rerender();
   }));
 }
+async function openDrawer(asin) { drawer(await api(`/api/products/${asin}`)); $("#drawer").classList.add("open"); $("#scrim").classList.add("open"); }
+function closeDrawer() { $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
 
-async function open(asin) {
-  openAsin = asin;
-  drawer(await api(`/api/products/${asin}`));
-  $("#drawer").classList.add("open"); $("#scrim").classList.add("open");
+/* ---------- actions ---------- */
+function openAdd() { $("#dlgAdd").showModal(); }
+async function copyAsins() {
+  const t = await api("/api/asins");
+  await navigator.clipboard.writeText(t); toast(`${t.trim().split("\n").filter(Boolean).length} ASINs copied. Paste into Stealth Seller or Keepa.`);
 }
-function close() { openAsin = null; $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
+async function scan() { const r = await api("/api/score", {}); toast(r.changes.length ? `${r.changes.length} product(s) moved up` : "Scan done. Nothing new."); route(); }
+async function refreshSellers(b) {
+  b.disabled = true;
+  try { toast((await api("/api/sellers/refresh", {})).message); pageSellers(); } catch (e) { toast(e.message); b.disabled = false; }
+}
 
-$("#table").onclick = (ev) => { const r = ev.target.closest(".row[data-asin]"); if (r) open(r.dataset.asin); };
-$("#scrim").onclick = close;
-document.onkeydown = (ev) => { if (ev.key === "Escape") close(); };
-$("#tabs").onclick = (ev) => {
-  const b = ev.target.closest("button"); if (!b) return;
-  [...$("#tabs").children].forEach((x) => x.classList.toggle("on", x === b));
-  verdict = b.dataset.v; render();
-};
-$("#search").oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { query = ev.target.value.trim(); render(); }, 150); };
-
-$("#btnAdd").onclick = () => $("#dlgAdd").showModal();
 $("#impKind").onchange = (ev) => ($("#buyerField").hidden = ev.target.value !== "orders");
 $("#addGo").onclick = async () => {
-  const msgs = [];
-  const text = $("#addText").value.trim();
+  const msgs = [], text = $("#addText").value.trim(), kind = $("#impKind").value, itemTitle = $("#itemTitle").value.trim();
   if (text) msgs.push(`${(await api("/api/add", { text })).added} ASINs added`);
-  const kind = $("#impKind").value;
+  if (itemTitle) {
+    await api("/api/items", { title: itemTitle, ebay: $("#itemEbay").value, facebook: $("#itemFb").value });
+    msgs.push(`Added "${itemTitle}"`); $("#itemTitle").value = $("#itemEbay").value = $("#itemFb").value = "";
+  }
   for (const f of $("#impFile").files) {
     try {
       const r = await api(`/api/import/${kind}`, { filename: f.name, content: await f.text(), buyer: $("#impBuyer").value, source: "upload" });
@@ -322,17 +642,41 @@ $("#addGo").onclick = async () => {
   }
   if (!msgs.length) return toast("Paste ASINs or choose a file");
   $("#dlgAdd").close(); $("#addText").value = ""; $("#impFile").value = "";
-  await api("/api/score", {}); toast(msgs.join(" · ")); load();
+  await api("/api/score", {}); toast(msgs.join(" · ")); route();
 };
-$("#btnScan").onclick = async () => {
-  const r = await api("/api/score", {});
-  toast(r.changes.length ? `${r.changes.length} new signal(s)` : "Scan done — nothing new"); load();
+$("#sellerGo").onclick = async () => {
+  try {
+    const r = await api("/api/sellers", { seller: $("#sellerIn").value, name: $("#sellerName").value });
+    $("#dlgSeller").close(); $("#sellerIn").value = ""; $("#sellerName").value = ""; toast(r.message); pageSellers();
+  } catch (e) { toast(e.message); }
 };
 
-const dl = document.createElement("datalist"); dl.id = "stores";
-dl.innerHTML = ["walmart","target","costco","samsclub","homedepot","lowes","bestbuy","cvs","walgreens","traderjoes","wholefoods","kohls","dollartree"].map((r) => `<option value="${r}">`).join("");
+/* ---------- routing ---------- */
+const PAGES = { dashboard: pageDashboard, products: pageProducts, inventory: pageInventory, sellers: pageSellers, setup: pageSetup };
+function current() { const [p, qs] = (location.hash.slice(2) || "dashboard").split("?"); return [PAGES[p] ? p : "dashboard", new URLSearchParams(qs || "")]; }
+function rerender() { const [p] = current(); if (p === "products") renderTable(); else if (p === "dashboard") pageDashboard(); else if (p === "inventory") pageInventory(); }
+async function route() {
+  routeSeq++;
+  const [p, params] = current();
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.p === p));
+  document.body.classList.remove("menu");
+  try { await PAGES[p](params); } catch (e) { $("#main").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
+}
+window.onhashchange = route;
+$("#main").addEventListener("click", (e) => { const r = e.target.closest("[data-asin]"); if (r) openDrawer(r.dataset.asin); });
+$("#scrim").onclick = closeDrawer;
+document.onkeydown = (e) => { if (e.key === "Escape") closeDrawer(); };
+$("#miniBtn").onclick = () => document.body.classList.toggle("mini");
+$("#menuBtn").onclick = () => document.body.classList.toggle("menu");
+$("#scanBtn").onclick = (e) => { e.preventDefault(); scan(); };
+
+const dl = document.createElement("datalist"); dl.id = "storeList";
+dl.innerHTML = ["walmart","target","costco","samsclub","homedepot","lowes","bestbuy","cvs","walgreens","traderjoes","wholefoods","kroger","meijer","kohls","dollartree"].map((r) => `<option value="${r}">`).join("");
 document.body.appendChild(dl);
-load();
+api("/api/sellers").then((l) => ($("#navSellers").textContent = l.length || "")).catch(() => {});
+api("/api/inventory").then((l) => ($("#navInv").textContent = l.filter((r) => r.status !== "sold").length || "")).catch(() => {});
+api("/api/setup").then((s) => ($("#navSetup").textContent = s.items.filter((i) => !i.done).length || "")).catch(() => {});
+route();
 </script>
 </body>
 </html>
