@@ -361,6 +361,11 @@ def t_ungate_targets(conn, a):
             + f"\n\n{t['closed_to_applications']} products are in brands Amazon is not accepting applications for. 'Strong' = rank under 50,000 and price $10+.")
 
 
+def t_advantage(conn, a):
+    from . import advantage
+    return advantage.summary_text(advantage.report(conn), int(a.get("limit") or 8))
+
+
 def t_recheck_gated(conn, a):
     """After the user gets approved for something, drop old gating answers so the next run re-checks them."""
     where, args = ["e.source = 'spapi'"], []
@@ -460,6 +465,7 @@ TOOLS = {
                             {"add": {"type": "array", "items": S}, "remove": {"type": "array", "items": S}}),
     "outcomes": _tool(t_outcomes, "Predicted vs actual: how each verdict at purchase time performed once sold."),
     "ungate_targets": _tool(t_ungate_targets, "Which category/brand approvals would unlock the most strong products. Use when the user wants to decide what to get ungated.", {"limit": I}),
+    "advantage": _tool(t_advantage, "The user's edge over a brand-new seller: categories and brands their account can already sell that new accounts usually have to apply for. Use when they ask what they're ungated in or how their account compares.", {"limit": I}),
     "recheck_gated": _tool(t_recheck_gated, "After the user is approved for a brand/category, clear stale gating so it is re-checked (then call run_now).", {"brand": S, "category": S}),
     "invite_friend": _tool(t_invite_friend, "Make a share link so a friend can add their Amazon order history (filed under the label you give).", {"label": S}, ["label"]),
     "list_invites": _tool(t_list_invites, "Invite links and how many order lines each friend has sent."),

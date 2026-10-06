@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, engine, importers, invites, mcp, restrictions, ungate
+from . import advantage, db, engine, importers, invites, mcp, restrictions, ungate
 
 WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
@@ -70,12 +70,14 @@ PIN_MAX_FAILS, PIN_LOCK_SECONDS = 5, 3600
 
 _list_cache = {"key": None, "at": 0.0, "rows": None}
 _ungate_cache = {"at": 0.0, "data": None}
+_advantage_cache = {"at": 0.0, "data": None}
 LIST_TTL = 60
 
 
 def _invalidate_lists():
     _list_cache["at"] = 0.0
     _ungate_cache["at"] = 0.0
+    _advantage_cache["at"] = 0.0
 
 
 def make_handler(db_path):
@@ -236,6 +238,10 @@ def make_handler(db_path):
                     if time.time() - _ungate_cache["at"] > LIST_TTL or _ungate_cache["data"] is None:
                         _ungate_cache.update(at=time.time(), data=ungate.targets(conn))
                     return self._send(200, _ungate_cache["data"])
+                if url.path == "/api/advantage":
+                    if time.time() - _advantage_cache["at"] > LIST_TTL or _advantage_cache["data"] is None:
+                        _advantage_cache.update(at=time.time(), data=advantage.report(conn))
+                    return self._send(200, _advantage_cache["data"])
                 if url.path == "/api/outcomes":
                     return self._send(200, db.outcomes(conn))
                 if url.path == "/api/products":

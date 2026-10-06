@@ -568,7 +568,17 @@ const SUPPLIERS = [
 ];
 async function pageUngate() {
   const seq = routeSeq;
-  const t = await api("/api/ungate");
+  const [t, adv] = await Promise.all([api("/api/ungate"), api("/api/advantage")]);
+  const edgeRows = (rows, label) => rows.length ? `<div class="table-wrap"><table><thead><tr><th>${label}</th><th class="num">You can sell</th><th class="num">Strong</th><th>Why it matters</th><th>Examples</th></tr></thead><tbody>
+    ${rows.map((g) => `<tr><td><b>${esc(g.name)}</b></td><td class="num">${g.can_sell}</td><td class="num pos">${g.strong}</td>
+      <td class="dim">${esc(g.why)}</td><td class="dim" style="max-width:320px">${g.examples.map(esc).join(" · ")}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const edgeCard = !adv.checked
+    ? `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>Your edge over a new seller</h2><p>Nothing checked yet. Add your Amazon Seller API keys in Setup, then refresh data.</p></div></div></div>`
+    : `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>Your edge over a new seller</h2>
+        <p>${adv.edge_products} products you can sell are in categories or brands new accounts usually have to apply for (${adv.edge_strong} strong). Checked ${adv.checked} products, ${adv.from_amazon} straight from Amazon: ${adv.can_sell} can sell, ${adv.need_approval} need approval, ${adv.cant_sell} can't sell.</p></div></div>
+        <div class="card-b" style="padding:0">${edgeRows(adv.categories, "Category")}${edgeRows(adv.brands, "Brand")}
+          ${adv.categories.length || adv.brands.length ? "" : `<div class="empty">None of your sellable products are in the usual new-seller gated list yet.</div>`}</div>
+        <div class="tfoot"><span>${adv.open_brands.length ? `Brands you can sell: ${adv.open_brands.slice(0, 15).map((b) => `${esc(b.name)} (${b.products})`).join(", ")}. ` : ""}${esc(adv.note)}</span></div></div>`;
   const table = (rows, label) => rows.length ? `<div class="table-wrap"><table><thead><tr><th>${label}</th><th>Your status</th><th class="num">Products</th><th class="num">Strong</th><th class="num">Best rank</th><th class="num">Median price</th><th>Examples</th><th></th></tr></thead><tbody>
     ${rows.map((g) => `<tr><td><b>${esc(g.name)}</b>${g.tracking.note ? `<div class="dim" style="font-size:12px">${esc(g.tracking.note)}</div>` : ""}</td>
       <td><select data-appr="${esc(g.name)}" style="padding:4px 6px;font-size:12px">${Object.entries(APPR).map(([k, l]) => `<option value="${k}" ${g.tracking.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></td>
@@ -578,6 +588,7 @@ async function pageUngate() {
     : `<div class="empty">Nothing here yet. Refresh data so gating is checked first.</div>`;
   if (!paint(seq, `
     <div class="page-head"><div><h1>Ungate</h1><p>Which approvals would unlock the most good products. One category approval opens everything in it.</p></div></div>
+    ${edgeCard}
     <details class="card" style="margin-bottom:24px;padding:18px 20px"><summary style="cursor:pointer;font-weight:600">How to get approved</summary>
       <div style="margin-top:12px;line-height:1.6">
         <ol style="margin:0 0 12px;padding-left:20px">

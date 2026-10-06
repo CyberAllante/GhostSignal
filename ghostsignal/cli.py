@@ -20,6 +20,7 @@
   gs setup                                 what's connected and what's left to do
   gs gated ASIN ungated|approval|blocked   record whether you can sell it
   gs check-gated [--all]                   real gated check via Amazon SP-API
+  gs advantage                             what your account can sell that new sellers usually can't
   gs fees                                  real Amazon fees via SP-API
   gs location "Detroit, Michigan, United States"   your area for store prices
   gs prices [ASIN ...] [--max 25]          store prices near you (needs SERPAPI_KEY)
@@ -222,6 +223,11 @@ def cmd_check_gated(a):
     print(spapi.check_gated(conn, asins))
 
 
+def cmd_advantage(a):
+    from . import advantage
+    print(advantage.summary_text(advantage.report(_conn(a)), a.n))
+
+
 def cmd_market(a):
     from . import spapi
     conn = _conn(a)
@@ -422,6 +428,7 @@ def main(argv=None):
     s = sub.add_parser("gated"); s.add_argument("asin"); s.add_argument("status", choices=list(db.GATED_STATUSES))
     s.set_defaults(fn=cmd_gated)
     s = sub.add_parser("check-gated"); s.add_argument("--all", action="store_true"); s.set_defaults(fn=cmd_check_gated)
+    s = sub.add_parser("advantage"); s.add_argument("-n", type=int, default=10); s.set_defaults(fn=cmd_advantage)
     s = sub.add_parser("market"); s.add_argument("--all", action="store_true"); s.add_argument("--stale-days", type=float, default=None); s.set_defaults(fn=cmd_market)
     s = sub.add_parser("fees"); s.set_defaults(fn=cmd_fees)
 

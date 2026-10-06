@@ -459,3 +459,47 @@ def test_priority_orders_sellable_before_blocked():
     mid = engine.priority({"gated": "approval", "verdict": "RESEARCH", "score": 90})
     lo = engine.priority({"gated": "blocked", "verdict": "PASS", "score": 0})
     assert hi > mid > lo and engine.priority({"restricted": "x", "gated": "ungated", "verdict": "BUY", "score": 99}) == -1
+
+
+def test_advantage_vs_new_seller(conn, tmp_path, monkeypatch):
+    import base64, threading, urllib.request
+    from http.server import ThreadingHTTPServer
+    from ghostsignal import advantage, mcp, server
+    assert "No gating answers yet" in advantage.summary_text(advantage.report(conn))
+    db.upsert_product(conn, "B00F0FC3OC", title="Pocky Strawberry", brand="Pocky", category="Grocery & Gourmet Food")
+    db.add_snapshot(conn, "B00F0FC3OC", "t", buy_box=30.89, sales_rank=20200)
+    db.set_eligibility(conn, "B00F0FC3OC", "ungated", "spapi")
+    db.upsert_product(conn, "B0000MATT1", title="Hot Wheels 5-Pack", brand="Mattel", category="Toys & Games")
+    db.set_eligibility(conn, "B0000MATT1", "ungated", "spapi")
+    db.upsert_product(conn, "B0000PLAIN", title="Plain Notebook", brand="Acme", category="Office Products")
+    db.set_eligibility(conn, "B0000PLAIN", "ungated", "manual")
+    db.upsert_product(conn, "B0000LEGO1", title="LEGO set", brand="LEGO", category="Toys & Games")
+    db.set_eligibility(conn, "B0000LEGO1", "approval", "spapi", "You need approval to list in this brand.")
+    db.upsert_product(conn, "B0000AMZN1", title="Snacks", brand="Happy Belly", category="Grocery & Gourmet Food")
+    db.set_eligibility(conn, "B0000AMZN1", "ungated", "spapi")    # Amazon-owned: ignored
+    conn.commit()
+    r = advantage.report(conn)
+    assert (r["checked"], r["from_amazon"], r["can_sell"], r["need_approval"]) == (4, 3, 3, 1)
+    assert r["edge_products"] == 2 and r["edge_strong"] == 1          # Pocky (strong) + Mattel; notebook isn't an edge
+    assert {g["name"] for g in r["categories"]} == {"Grocery & Gourmet Food", "Toys & Games"}
+    assert [g["name"] for g in r["brands"]] == ["Mattel"]
+    assert r["categories"][0]["name"] == "Grocery & Gourmet Food"     # strong first
+    db.set_setting(conn, advantage.SETTING, "Acme")
+    assert "Acme" in {g["name"] for g in advantage.report(conn)["brands"]}
+    conn.commit()
+    # MCP tool and API route
+    import sqlite3
+    dbp = tmp_path / "a.db"
+    disk = sqlite3.connect(dbp)
+    conn.backup(disk)
+    disk.close()
+    out = mcp.handle(str(dbp), {"id": 1, "method": "tools/call", "params": {"name": "advantage", "arguments": {}}})
+    text = out["result"]["content"][0]["text"]
+    assert "EDGE: 3 products" in text and "Mattel" in text
+    monkeypatch.setenv("GHOSTSIGNAL_PASSWORD", "pw")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(str(dbp)))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_address[1]}/api/advantage",
+                                 headers={"Authorization": "Basic " + base64.b64encode(b"u:pw").decode()})
+    assert json.loads(urllib.request.urlopen(req).read())["edge_products"] == 3
+    httpd.shutdown()

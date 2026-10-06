@@ -38,6 +38,7 @@ Restart the app. Then try: **"What does GhostSignal say? Anything worth buying?"
 | "Why is the Pocky a buy?" | `product`: numbers, stores, history, notes |
 | "What can't you judge yet?" | `todo`: products missing data, and what's missing |
 | "Here's my girlfriend's order file" | `import_orders`, then it looks everything up |
+| "What am I ungated in? How does my account compare to a new seller?" | `advantage`: categories and brands you can sell that new accounts usually have to apply for |
 | "Is this gated for me?" / "It sells for $40 on eBay" | `set_gated` / `set_sell_price`, rescored right away |
 | "I bought 6 of these at Costco for $10.99" | `log_purchase` |
 | "Track this seller" | `track_seller` |
