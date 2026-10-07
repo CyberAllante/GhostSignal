@@ -486,3 +486,29 @@ def test_discover_adds_ranked_products_only(conn, monkeypatch):
     r = discover.run(conn, brands=["Squishmallows"])
     assert r == {"queries": 1, "seen": 3, "added": 1, "skipped_slow_or_unranked": 2}
     assert conn.execute("SELECT origin FROM products WHERE asin='B000000041'").fetchone()[0] == "brand:Squishmallows"
+
+
+def test_catalog_upc_and_snowball_targets(conn, monkeypatch):
+    from ghostsignal import spapi, discover
+    item = {"asin": "B000000051", "summaries": [{"marketplaceId": "ATVPDKIKX0DER", "brand": "Torani", "itemName": "Syrup"}],
+            "identifiers": [{"marketplaceId": "ATVPDKIKX0DER", "identifiers": [{"identifierType": "EAN", "identifier": "0070404000012"},
+                                                                                 {"identifierType": "UPC", "identifier": "070404000012"}]}]}
+    assert spapi.parse_catalog_item(item)[0]["upc"] == "070404000012"
+    # a sellable, in-demand Torani product makes Torani a snowball target; a slow one doesn't
+    for asin, rank in (("B000000052", 900), ("B000000053", 400000)):
+        db.upsert_product(conn, asin, title="Torani Syrup", brand="Torani" if rank < 1000 else "SlowCo")
+        db.add_snapshot(conn, asin, "spapi", buy_box=22.0, sales_rank=rank, offer_count=4)
+        db.set_eligibility(conn, asin, "ungated", "spapi")
+    assert discover.snowball_targets(conn) == ["Torani"]
+    monkeypatch.setattr(discover, "run", lambda conn, brands, pages: {"queries": 1, "seen": 0, "added": 0, "skipped_slow_or_unranked": 0})
+    assert discover.snowball(conn)["brands"] == ["Torani"]
+    assert discover.snowball_targets(conn) == []          # not again for two weeks
+
+
+def test_fees_only_refetched_when_stale(conn):
+    from ghostsignal import cli
+    db.upsert_product(conn, "B000000061", title="A")
+    db.add_snapshot(conn, "B000000061", "spapi", buy_box=20.0)
+    assert cli._fees_due(conn) == ["B000000061"]
+    db.add_snapshot(conn, "B000000061", "spapi-fees", buy_box=20.0, fba_fee=4.0)
+    assert cli._fees_due(conn) == []

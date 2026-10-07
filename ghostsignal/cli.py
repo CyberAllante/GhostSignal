@@ -179,7 +179,7 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
         unchecked = _unchecked_gated(conn)
         if unchecked:
             print("gated check:", spapi.check_gated(conn, unchecked), flush=True)
-        print("fees updated:", spapi.update_fees(conn, _live_asins(conn)), flush=True)
+        print("fees updated:", spapi.update_fees(conn, _fees_due(conn)), flush=True)
     if stores.configured():
         print("store prices:", stores.find_prices(conn, stores.due_for_check(conn, max_prices)), flush=True)
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -188,6 +188,16 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
     changes = engine.run(conn)
     print(f"{len(changes)} alert(s)", flush=True)
     engine.send_alerts(changes)
+    if spapi.configured() and not getattr(run_pipeline, "_in_snowball", False):
+        from . import discover
+        sb = discover.snowball(conn)
+        print("snowball:", sb, flush=True)
+        if sb.get("added"):        # check what the snowball found in the same run (sends its own alerts)
+            run_pipeline._in_snowball = True
+            try:
+                changes = changes + run_pipeline(conn, stale_days, max_prices)
+            finally:
+                run_pipeline._in_snowball = False
     return changes
 
 
@@ -197,6 +207,17 @@ def cmd_run(a):
 
 def _live_asins(conn):
     return [r[0] for r in conn.execute("SELECT asin FROM products WHERE status NOT IN ('dead','pass')")]
+
+
+def _fees_due(conn, days=14, limit=400):
+    """Amazon's fees barely move, so only re-ask for products with a price and no fee lookup in two weeks."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return [r[0] for r in conn.execute(
+        """SELECT p.asin FROM products p
+           WHERE p.status NOT IN ('dead','pass') AND length(p.asin) = 10 AND p.asin NOT LIKE 'GS%'
+             AND EXISTS (SELECT 1 FROM snapshots s WHERE s.asin = p.asin AND COALESCE(s.buy_box, s.avg_price_90) IS NOT NULL)
+             AND NOT EXISTS (SELECT 1 FROM snapshots s WHERE s.asin = p.asin AND s.source = 'spapi-fees' AND s.captured_at >= ?)
+           LIMIT ?""", (cutoff, limit))]
 
 
 def _unchecked_gated(conn, days=30):

@@ -182,8 +182,11 @@ def parse_catalog_item(item: dict) -> tuple[dict, int | None, dict]:
     sub = classes[0] if classes else {}
     main_cat = (group[0].get("title") if group else "") or (sub.get("title") or "") or (summ.get("browseClassification") or {}).get("displayName") or ""
     main = next((i for i in imgs.get("images") or [] if i.get("variant") == "MAIN"), None)
+    ids = pick(item.get("identifiers")).get("identifiers") or []
+    by_type = {i.get("identifierType"): i.get("identifier") for i in ids}
+    upc = by_type.get("UPC") or by_type.get("EAN") or by_type.get("GTIN")
     product = {"title": summ.get("itemName"), "brand": summ.get("brand") or summ.get("manufacturer"),
-               "category": main_cat, "image_url": (main or {}).get("link")}
+               "category": main_cat, "image_url": (main or {}).get("link"), "upc": upc}
     return product, rank, {"sub_rank": sub.get("rank"), "sub_category": sub.get("title")}
 
 
@@ -216,7 +219,7 @@ def parse_offers(payload: dict) -> dict:
 def _catalog(asins: list[str]) -> dict:
     data = _call("GET", "/catalog/2022-04-01/items", {
         "identifiers": ",".join(asins), "identifiersType": "ASIN", "marketplaceIds": MARKETPLACE_US,
-        "includedData": "summaries,salesRanks,images", "pageSize": 20})
+        "includedData": "summaries,salesRanks,images,identifiers", "pageSize": 20})
     return {i["asin"]: i for i in data.get("items") or [] if i.get("asin")}
 
 

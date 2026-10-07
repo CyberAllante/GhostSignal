@@ -36,7 +36,7 @@ def search(keywords: str, brand: str | None = None, pages: int = 2) -> list[dict
     out, token = [], None
     for _ in range(pages):
         params = {"keywords": keywords, "marketplaceIds": spapi.MARKETPLACE_US,
-                  "includedData": "summaries,salesRanks,images", "pageSize": 20}
+                  "includedData": "summaries,salesRanks,images,identifiers", "pageSize": 20}
         if brand:
             params["brandNames"] = brand
         if token:
@@ -77,7 +77,54 @@ def run(conn, groups: list[str] | None = None, brands: list[str] | None = None, 
                 continue
             new = conn.execute("SELECT 1 FROM products WHERE asin = ?", (it["asin"],)).fetchone() is None
             db.upsert_product(conn, it["asin"], title=it["title"], brand=it["brand"], category=it["category"],
-                              image_url=it["image_url"], origin=origin)
+                              image_url=it["image_url"], upc=it.get("upc"), origin=origin)
             added += new
         conn.commit()
     return {"queries": len(queries), "seen": seen, "added": added, "skipped_slow_or_unranked": skipped}
+
+
+# ---------------------------------------------------------------- snowball
+
+SNOW_KEY = "snowball_brands"
+SNOW_EVERY_DAYS = 14
+
+
+def snowball_targets(conn, limit: int = 8) -> list[str]:
+    """Brands worth pulling the whole catalog for: they already have a product you can sell (or are one approval
+    away from) with real demand and a workable price, and haven't been expanded in the last two weeks."""
+    import json
+    from . import engine
+    done = json.loads(db.get_setting(conn, SNOW_KEY) or "{}")
+    score: dict[str, int] = {}
+    for (asin,) in conn.execute("SELECT asin FROM products WHERE status != 'dead' AND brand IS NOT NULL AND brand != ''"):
+        v = engine.list_view(conn, asin)
+        s, e = v["snapshot"] or {}, v["economics"]
+        if v["restricted"] or v["gated"] not in ("ungated", "approval"):
+            continue
+        if not s.get("sales_rank") or s["sales_rank"] > 50_000 or (e.get("sale_price") or 0) < 15 or s.get("amazon_price"):
+            continue
+        if (v.get("enrichment") or {}).get("sold_in_stores") is False:
+            continue
+        score[v["brand"]] = score.get(v["brand"], 0) + (2 if v["gated"] == "ungated" else 1)
+    fresh = [b for b in score if not done.get(b) or _age_days(done[b]) >= SNOW_EVERY_DAYS]
+    return sorted(fresh, key=lambda b: -score[b])[:limit]
+
+
+def _age_days(iso: str) -> float:
+    from datetime import datetime, timezone
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds() / 86400
+
+
+def snowball(conn, limit: int = 8) -> dict:
+    """Find a winner, then pull the rest of that brand's catalog: the 'one diamond leads to the next' loop."""
+    import json
+    brands = snowball_targets(conn, limit)
+    if not brands:
+        return {"brands": [], "added": 0}
+    r = run(conn, brands=brands, pages=3)
+    done = json.loads(db.get_setting(conn, SNOW_KEY) or "{}")
+    for b in brands:
+        done[b] = db.now()
+    db.set_setting(conn, SNOW_KEY, json.dumps(done))
+    conn.commit()
+    return {"brands": brands, **r}
