@@ -36,6 +36,13 @@ KNOWN = {
     "kohls": "kohls", "dollartree": "dollartree", "kroger": "kroger", "meijer": "meijer",
     "traderjoes": "traderjoes", "bjswholesaleclub": "bjs", "dollargeneral": "dollargeneral",
     "ulta": "ulta", "ultabeauty": "ulta", "staples": "staples", "petsmart": "petsmart", "petco": "petco",
+    "costcowholesale": "costco", "barnesnoble": "barnesandnoble", "tjmaxx": "tjmaxx", "tj": "tjmaxx",
+    "olliesbargainoutlet": "ollies", "dickssportinggoods": "dickssportinggoods", "officedepotofficemax": "officedepot",
+    "officedepot": "officedepot", "riteaid": "riteaid", "acehardware": "acehardware", "jcpenney": "jcpenney",
+    "homegoods": "homegoods", "marshalls": "marshalls", "rossdressforless": "rossstores", "biglots": "biglots",
+    "hobbylobby": "hobbylobby", "michaels": "michaels", "michaelsstores": "michaels", "fivebelow": "fivebelow",
+    "familydollar": "familydollar", "tractorsupplyco": "tractorsupply", "tractorsupply": "tractorsupply",
+    "gamestop": "gamestop", "newegg": "newegg", "neweggcom": "newegg", "heb": "heb", "hyvee": "hyvee", "aldi": "aldi",
 }
 SKIP = ("amazon", "ebay", "etsy", "aliexpress", "temu", "poshmark", "mercari")
 
@@ -48,9 +55,11 @@ def configured() -> bool:
 
 
 def store_key(name: str) -> str | None:
+    if re.search(r"\s-\s*(seller|marketplace)", (name or "").lower()):   # third-party sellers on a store's marketplace
+        return None
     n = (name or "").lower().split(" - ")[0].strip()
     n = re.sub(r"^(https?://)?(www\.)?", "", n)
-    if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", n):  # a domain like samsclub.com
+    if re.fullmatch(r"[a-z0-9.-]+\.(com|net|org|us|co)", n):  # a domain like samsclub.com
         n = n.rsplit(".", 1)[0]
     n = re.sub(r"[^a-z]", "", n)
     if not n or any(s in n for s in SKIP):
@@ -133,13 +142,26 @@ def same_size(a: str, b: str) -> bool | None:
     return verdict
 
 
+# Reputable retailers only: arbitrage buys need a real store receipt/invoice (also what ungating asks for), and
+# marketplaces, used-book sites and tiny shops give fake "cheap" prices (used copies, samples, wrong packs).
+RETAILERS_OK = {
+    "walmart", "target", "costco", "samsclub", "bjs", "kroger", "meijer", "heb", "publix", "safeway", "albertsons",
+    "hyvee", "wegmans", "foodlion", "giantfood", "stopandshop", "shoprite", "wholefoods", "traderjoes", "aldi",
+    "cvs", "walgreens", "riteaid", "homedepot", "lowes", "menards", "acehardware", "tractorsupply", "bestbuy",
+    "staples", "officedepot", "booksamillion", "barnesandnoble", "gamestop", "ulta", "sephora", "petsmart", "petco",
+    "chewy", "michaels", "joann", "hobbylobby", "kohls", "macys", "jcpenney", "tjmaxx", "marshalls", "homegoods",
+    "rossstores", "burlington", "ollies", "biglots", "dollartree", "dollargeneral", "familydollar", "fivebelow",
+    "dickssportinggoods", "academy", "scheels", "golfgalaxy", "newegg", "bedbathandbeyond", "worldmarket", "crateandbarrel",
+}
+
+
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
     """Cheapest close match per store."""
     best: dict[str, dict] = {}
     for r in results:
         key = store_key(r.get("source", ""))
         price = r.get("extracted_price")
-        if not key or not isinstance(price, (int, float)):
+        if not key or key not in RETAILERS_OK or not isinstance(price, (int, float)):
             continue
         match = similarity(amazon_title, r.get("title", ""))
         # Lens already matched the photo, so its (often shorter) store titles need less word overlap.

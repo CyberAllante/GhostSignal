@@ -575,3 +575,11 @@ def test_holiday_calendar_and_deadlines():
     assert rows["Christmas"]["fba_send_by"] == "2026-11-05" and rows["Christmas"]["status"] == "prep"
     assert rows["Easter"]["date"] == "2027-03-28"                                 # rolls to next year once passed
     assert "christmas ornaments" in holidays.keywords_for("Christmas")
+
+
+def test_only_reputable_retailers_count():
+    from ghostsignal.stores import pick_offers
+    t = "Hershey's Chocolate Full-Size Variety Pack, 30 ct."
+    res = [{"source": "TikTok Shop", "extracted_price": 5.0, "title": t}, {"source": "Walmart - Seller", "extracted_price": 6.0, "title": t},
+           {"source": "Costco Wholesale", "extracted_price": 18.99, "title": t}, {"source": "T.J.Maxx", "extracted_price": 19.99, "title": t}]
+    assert [o["retailer"] for o in pick_offers(res, t)] == ["costco", "tjmaxx"]
