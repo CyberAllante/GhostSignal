@@ -431,6 +431,22 @@ def t_discover(conn, a):
             "(can take 20+ minutes for a big batch). Then use `picks` or `search`.")
 
 
+def t_holidays(conn, a):
+    from . import holidays
+    from .server import discover_in_background, is_running
+    if a.get("pull"):
+        kws = holidays.keywords_for(a["pull"])
+        if not kws:
+            return f"Unknown holiday. Options: {', '.join(holidays.HOLIDAYS)}"
+        if is_running():
+            return "A data run is already going; try again when it finishes."
+        discover_in_background(_path(conn), keywords=kws, tag=f"holiday:{a['pull']}", pages=2)
+        return f"Pulling {a['pull']} products ({', '.join(kws)}). They get gating, prices and scores in the same run."
+    rows = holidays.upcoming()
+    return "\n".join(f"- {r['name']} {r['date']} ({r['days_left']} days): {r['advice']}. Buyers start ~{r['ramp_start']}."
+                     for r in rows)
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -483,6 +499,8 @@ TOOLS = {
                       "(groups: grocery, books, toys_plush, home, office_school, pet, beauty_health) or given brands/keywords.",
                       {"groups": {"type": "array", "items": S}, "brands": {"type": "array", "items": S},
                        "keywords": {"type": "array", "items": S}, "pages": I}),
+    "holidays": _tool(t_holidays, "Upcoming holidays with buy/ship-by dates; pass pull=<holiday name> to discover products for it.",
+                      {"pull": S}),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

@@ -252,6 +252,9 @@ def make_handler(db_path):
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
                 if url.path == "/api/invites":
                     return self._send(200, invites.listing(conn))
+                if url.path == "/api/holidays":
+                    from . import holidays
+                    return self._send(200, holidays.upcoming())
                 if url.path == "/api/ungate":
                     if time.time() - _ungate_cache["at"] > LIST_TTL or _ungate_cache["data"] is None:
                         _ungate_cache.update(at=time.time(), data=ungate.targets(conn))
@@ -590,6 +593,15 @@ def make_handler(db_path):
                 if url.path == "/api/demo/clear":
                     from .demo import clear_demo
                     return self._send(200, {"removed": clear_demo(conn)})
+                if url.path == "/api/holidays/pull":
+                    from . import holidays
+                    kws = holidays.keywords_for(body.get("name") or "")
+                    if not kws:
+                        return self._send(400, {"error": "unknown holiday"})
+                    if is_running():
+                        return self._send(200, {"started": False, "running": True})
+                    discover_in_background(db_path, keywords=kws, tag=f"holiday:{body['name']}", pages=2)
+                    return self._send(200, {"started": True, "running": True})
                 if url.path == "/api/discover":
                     if is_running():
                         return self._send(200, {"started": False, "running": True})

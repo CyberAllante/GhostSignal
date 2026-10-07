@@ -244,6 +244,7 @@
   <nav id="nav">
     <a href="#/dashboard" data-p="dashboard"><svg class="i"><use href="#i-dash"/></svg><span class="label">Dashboard</span></a>
     <a href="#/hot" data-p="hot"><svg class="i"><use href="#i-scan"/></svg><span class="label">Hot</span><span class="badge" id="navHot"></span></a>
+    <a href="#/holidays" data-p="holidays"><svg class="i"><use href="#i-dash"/></svg><span class="label">Holidays</span></a>
     <a href="#/products" data-p="products"><svg class="i"><use href="#i-box"/></svg><span class="label">Products</span><span class="badge" id="navProducts"></span></a>
     <a href="#/inventory" data-p="inventory"><svg class="i"><use href="#i-cart"/></svg><span class="label">Inventory</span><span class="badge" id="navInv"></span></a>
     <a href="#/sellers" data-p="sellers"><svg class="i"><use href="#i-users"/></svg><span class="label">Sellers</span><span class="badge" id="navSellers"></span></a>
@@ -392,6 +393,36 @@ async function pageHot() {
     ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
     ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
     ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
+}
+
+/* ---------- holidays ---------- */
+const HSTATUS = { now: ["Act now", "BUY"], prep: ["Plan ahead", "RESEARCH"], fbm: ["FBM only", "approval"], late: ["Too late", "PASS"] };
+function holidayItems(name) {
+  return products.filter((p) => (p.origin || "").split(",").includes(`holiday:${name}`) && !p.restricted
+    && p.enrichment?.sold_in_stores !== false && !p.snapshot?.amazon_price && (p.economics.sale_price || 0) >= 15)
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+}
+async function pageHolidays() {
+  const seq = routeSeq;
+  const [hs] = await Promise.all([api("/api/holidays"), loadProducts()]);
+  const fmt = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const card = (h) => {
+    const items = holidayItems(h.name), [label, cl] = HSTATUS[h.status];
+    return `<div class="card" style="margin-bottom:20px"><div class="card-h"><div>
+        <h2>${esc(h.name)} <span class="dim" style="font-weight:400">${fmt(h.date)} · ${h.days_left} days</span></h2>
+        <p><span class="pill ${cl}">${label}</span> ${esc(h.advice)} · buyers start shopping around ${fmt(h.ramp_start)}</p></div>
+        <button class="btn sm" data-pull="${esc(h.name)}">${icon("search")}Pull ${esc(h.name)} products</button></div>
+      ${items.length ? `<div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Sells</th><th class="num">Rank</th><th class="num">Sellers</th><th class="num">Buy under</th><th>Best store price</th><th class="num">Profit</th></tr></thead>
+        <tbody>${items.slice(0, 15).map(hotRow).join("")}</tbody></table></div>`
+        : `<div class="card-b"><div class="hint">No ${esc(h.name)} products yet. Pull them to search Amazon for: ${h.keywords.map(esc).join(", ")}.</div></div>`}</div>`;
+  };
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Holidays</h1><p>What's coming and when to buy. Seasonal items sell in a burst before the date, so stock has to be listed before buyers start shopping. FBA dates are planning suggestions with Q4 check-in delays built in; Amazon publishes its own official cutoffs.</p></div></div>
+    ${hs.map(card).join("")}`)) return;
+  $("#main").querySelectorAll("[data-pull]").forEach((b) => (b.onclick = async () => {
+    const r = await api("/api/holidays/pull", { name: b.dataset.pull });
+    toast(r.started ? `Pulling ${b.dataset.pull} products. They'll show here as they're checked (about 20 min).` : "A data run is already going. Try again when it finishes.");
+  }));
 }
 
 const sub = (p) => {
@@ -926,7 +957,7 @@ $("#sellerGo").onclick = async () => {
 };
 
 /* ---------- routing ---------- */
-const PAGES = { dashboard: pageDashboard, hot: pageHot, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, friends: pageFriends, setup: pageSetup };
+const PAGES = { dashboard: pageDashboard, hot: pageHot, holidays: pageHolidays, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, friends: pageFriends, setup: pageSetup };
 function current() { const [p, qs] = (location.hash.slice(2) || "dashboard").split("?"); return [PAGES[p] ? p : "dashboard", new URLSearchParams(qs || "")]; }
 function rerender() { const [p] = current(); if (p === "products") renderTable(); else if (p === "dashboard") pageDashboard(); else if (p === "inventory") pageInventory(); }
 async function route() {

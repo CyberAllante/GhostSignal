@@ -563,3 +563,15 @@ def test_amazon_detected_by_its_offer_seller_id():
                            "NumberOfOffers": [{"condition": "new", "fulfillmentChannel": "Amazon", "OfferCount": 1}]},
                "Offers": [{"SellerId": "A2R2RITDJNW1Q6", "IsBuyBoxWinner": True, "ListingPrice": {"Amount": 5.68}}]}
     assert spapi.parse_offers(payload)["amazon_price"] == 5.68
+
+
+def test_holiday_calendar_and_deadlines():
+    from datetime import date
+    from ghostsignal import holidays
+    assert holidays._easter(2027) == date(2027, 3, 28) and holidays._easter(2026) == date(2026, 4, 5)
+    assert holidays._nth_weekday(2026, 11, 3, 4) == date(2026, 11, 26)          # Thanksgiving
+    rows = {r["name"]: r for r in holidays.upcoming(date(2026, 10, 7), count=20)}
+    assert rows["Halloween"]["status"] == "fbm" and rows["Halloween"]["days_left"] == 24
+    assert rows["Christmas"]["fba_send_by"] == "2026-11-05" and rows["Christmas"]["status"] == "prep"
+    assert rows["Easter"]["date"] == "2027-03-28"                                 # rolls to next year once passed
+    assert "christmas ornaments" in holidays.keywords_for("Christmas")

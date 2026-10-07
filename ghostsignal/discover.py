@@ -53,13 +53,13 @@ def search(keywords: str, brand: str | None = None, pages: int = 2) -> list[dict
 
 
 def run(conn, groups: list[str] | None = None, brands: list[str] | None = None, keywords: list[str] | None = None,
-        pages: int = 2, max_rank: int | None = 200_000) -> dict:
+        pages: int = 2, max_rank: int | None = 200_000, tag: str | None = None) -> dict:
     """Add catalog products to the database. Skips items with no sales rank or a very poor one (dead listings)."""
     queries: list[tuple[str, str | None, str]] = []
     for b in brands or []:
         queries.append((b, b, f"brand:{b}"))
     for k in keywords or []:
-        queries.append((k, None, f"search:{k}"))
+        queries.append((k, None, tag or f"search:{k}"))
     for g in groups or ([] if (brands or keywords) else list(SEEDS)):
         for b in SEEDS.get(g, []):
             queries.append((b, b, f"discover:{g}"))
