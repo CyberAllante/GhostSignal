@@ -192,7 +192,7 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
         if not offers and p["image_url"] and used < budget:
             offers = pick_offers(search_lens(p["image_url"]), p["title"]); used += 1
         searched += 1
-        for o in offers[:6]:
+        for o in offers[:10]:
             db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
                           note=f"{o['via']} · {int(o['match'] * 100)}% match"
                                + (" · same size" if o.get("size_ok") else " · size not stated, check it")

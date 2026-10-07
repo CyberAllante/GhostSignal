@@ -149,6 +149,10 @@
   .dh h2 { font-size: 16px; margin: 4px 48px 8px 0; line-height: 1.35; }
   .db { padding: 8px 24px 32px; }
   .sec { margin-top: 20px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip-store { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-decoration: none; background: #fff; white-space: nowrap; }
+  .chip-store.under { border-color: #86efac; background: #f0fdf4; }
+  .chip-store .fav { width: 12px; height: 12px; }
   .pimg { display: block; margin-top: 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
   .pimg img { max-width: 100%; max-height: 240px; object-fit: contain; display: inline-block; }
   details.edit { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -342,7 +346,7 @@ function gatedPill(p) {
 
 const CH = { amazon: "Amazon", ebay: "eBay", facebook: "Facebook" };
 const chPill = (c) => c ? `<span class="pill ch-${c}">${CH[c]}</span>` : `<span class="pill ch-none">Not listed</span>`;
-const domain = (r) => ({ samsclub: "samsclub.com", homedepot: "homedepot.com", wholefoods: "wholefoodsmarket.com", traderjoes: "traderjoes.com", bjs: "bjs.com" }[r] || r + ".com");
+const domain = (r) => ({ samsclub: "samsclub.com", homedepot: "homedepot.com", wholefoods: "wholefoodsmarket.com", traderjoes: "traderjoes.com", bjs: "bjs.com", tjmaxx: "tjmaxx.com", ollies: "ollies.us", dollargeneral: "dollargeneral.com" }[r] || r + ".com");
 const fav = (r) => `<img class="fav" alt="" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain(r))}&sz=32">`;
 const thumb = (p) => p.image_url ? `<span class="thumb" style="background-image:url('${esc(p.image_url)}')"></span>` : `<span class="thumb">${esc((p.title || p.asin || "?")[0])}</span>`;
 
@@ -371,11 +375,15 @@ function hotTiers(list) {
     approval: leads.filter((p) => p.gated === "approval"),
   };
 }
+const storeChips = (p) => (p.stores || []).length
+  ? `<div class="chips">${p.stores.map((x) => `<a class="chip-store ${x.price <= (p.economics.max_cost ?? -1) ? "under" : ""}" href="${esc(x.url || "#")}" target="_blank" rel="noopener" title="${x.verified ? "same size" : "size not stated, check it"}">${fav(x.retailer)}${esc(domain(x.retailer))} <b>${money(x.price)}</b>${x.verified ? "" : "?"}</a>`).join("")}</div>`
+  : "";
 function hotRow(p) {
   const s = p.snapshot || {}, e = p.economics, b = p.best_source;
-  const store = b ? `${fav(b.retailer)}${esc(b.retailer)} ${money(b.price)}${b.verified ? "" : ` <span class="dim">(size?)</span>`}` : `<span class="dim">no store price yet</span>`;
+  const store = b ? `${fav(b.retailer)}${esc(b.retailer)} ${money(b.price)}${b.verified ? "" : ` <span class="dim">(size?)</span>`}`
+    : `<button class="btn sm" data-check="${p.asin}">${icon("search")}Check stores</button>`;
   return `<tr class="click" data-asin="${p.asin}">
-    <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}</div></div></div></td>
+    <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}</div>${storeChips(p)}</div></div></td>
     <td class="num">${money(e.sale_price)}</td><td class="num">#${num(s.sales_rank)}</td><td class="num">${s.offer_count ?? "—"}${s.fba_offers != null ? ` <span class="dim">(${s.fba_offers} FBA)</span>` : ""}</td>
     <td class="num"><b>${money(e.max_cost)}</b>${e.fbm?.max_cost != null ? `<div class="dim" style="font-size:11px">FBM ${money(e.fbm.max_cost)}</div>` : ""}</td>
     <td>${store}</td><td class="num ${cls(e.profit)}">${e.profit != null ? money(e.profit) : "—"}</td></tr>`;
@@ -384,17 +392,23 @@ async function pageHot() {
   const seq = routeSeq;
   await loadProducts();
   const t = hotTiers(products);
+  const budget = await api("/api/stores/budget").catch(() => ({}));
   $("#navHot").textContent = (t.bangers.length + t.check.length) || "";
   const section = (title, sub, rows, empty) => `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
     <div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Sells</th><th class="num">Rank</th><th class="num">Sellers</th><th class="num">Buy under</th><th>Best store price</th><th class="num">Profit</th></tr></thead>
     <tbody>${rows.length ? rows.slice(0, 100).map(hotRow).join("") : `<tr><td colspan="7"><div class="empty">${empty}</div></td></tr>`}</tbody></table></div></div>`;
   if (!paint(seq, `
-    <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.</p></div>
+    <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.${budget.left != null ? ` <b>${budget.left} store searches left this month</b> (each Check stores uses 1 to 3).` : ""}</p></div>
       <div class="actions"><button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
     ${section("🔥 Bangers", "Store price is under your max cost and the size is confirmed. Go buy.", t.bangers, "None yet. Store prices are checked about 10 products a day on your SerpAPI plan.")}
     ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
     ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
     ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
+  $("#main").querySelectorAll("[data-check]").forEach((btn) => (btn.onclick = async (ev) => {
+    ev.stopPropagation(); btn.disabled = true; btn.textContent = "Checking…";
+    try { await api(`/api/products/${btn.dataset.check}/prices`, {}); productsAt = 0; toast("Store prices updated. Check pack sizes match."); pageHot(); }
+    catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Check stores"; }
+  }));
 }
 
 /* ---------- holidays ---------- */
@@ -755,7 +769,7 @@ async function pageSetup() {
 function drawer(p) {
   const e = p.economics, s = p.snapshot || {};
   const kv = (k, v, c = "") => `<div><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`;
-  const stores = ["walmart", "target", "costco", "samsclub", "google"].concat(p.enrichment?.likely_retailers || []).filter((k, i, a) => p.links.retail[k] && a.indexOf(k) === i).slice(0, 7);
+  const stores = ["walmart", "target", "costco", "samsclub", "kroger", "meijer", "bjs", "google"].concat(p.enrichment?.likely_retailers || []).filter((k, i, a) => p.links.retail[k] && a.indexOf(k) === i).slice(0, 10);
   const ch = e.channels || {}, notAmazon = p.asin.startsWith("GS");
   const chanCard = (k) => { const c = ch[k]; return `<div class="${e.best_channel === k ? "best" : ""}"><div class="k">${CH[k]}${e.best_channel === k ? " · best" : ""}</div>
     <div class="v">${c ? money(c.price) : "—"}</div><div class="p ${cls(c?.profit)}">${c?.profit != null ? money(c.profit) + " profit" : c ? "add a cost" : "no price yet"}</div></div>`; };
@@ -799,7 +813,7 @@ function drawer(p) {
       <div class="sec"><div class="linkrow">
         ${p.links.amazon ? `<a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon ↗</a><a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa ↗</a>` : `<a href="${p.links.amazon_search}" target="_blank" rel="noopener">Search Amazon ↗</a>`}
         <a href="${p.links.ebay_sold}" target="_blank" rel="noopener">eBay sold ↗</a>
-        ${stores.slice(0, 4).map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">${esc(p.links.retail[k].name)} ↗</a>`).join("")}</div></div>
+        ${stores.slice(0, 8).map((k) => `<a href="${esc(p.links.retail[k].url)}" target="_blank" rel="noopener">${esc(p.links.retail[k].name)} ↗</a>`).join("")}</div></div>
 
       <details class="edit"><summary>Edit</summary>
         ${editGated}
@@ -961,6 +975,7 @@ window.onhashchange = route;
 $("#main").addEventListener("click", (e) => {
   const g = e.target.closest("a[data-group]");
   if (g) { e.preventDefault(); openGroup(g.dataset.kind, g.dataset.group); return; }
+  if (e.target.closest("a.chip-store, [data-check]")) return;   // store link / price check, not the row
   const r = e.target.closest("[data-asin]"); if (r) { drawerBack = null; openDrawer(r.dataset.asin); }
 });
 $("#scrim").onclick = closeDrawer;

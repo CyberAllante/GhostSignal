@@ -195,9 +195,12 @@ def priority(view: dict) -> int:
 
 def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
     """The slim version of product_view for lists and tables (about a tenth of the size)."""
-    product, snap, _sources, orders, sig = evaluate(conn, asin, cfg)
+    product, snap, sources, orders, sig = evaluate(conn, asin, cfg)
     e = sig.economics
     s = dict(snap) if snap else None
+    stores = sorted(({"retailer": x["retailer"], "price": round(x["price"] * (x.get("pack_qty") or 1), 2),
+                      "verified": "size not stated" not in (x.get("note") or ""), "url": x.get("url") or ""}
+                     for x in sources if x.get("price") is not None and x.get("in_stock") != 0), key=lambda x: x["price"])
     enr = _enrichment(conn, asin)
     el = db.get_eligibility(conn, asin)
     view = {
@@ -208,6 +211,7 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
                                                          "referral_fee", "fba_fee", "fbm")},
         "snapshot": {k: s.get(k) for k in ("sales_rank", "monthly_sold", "offer_count", "fba_offers", "captured_at", "amazon_price")} if s else None,
         "orders": {"orders": orders.get("orders") or 0},
+        "stores": stores[:8],
         "best_source": {"retailer": sig.best_source["retailer"], "price": sig.best_source.get("unit_cost"),
                         "verified": "size not stated" not in (sig.best_source.get("note") or "")} if sig.best_source else None,
         "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores")} if enr else None,

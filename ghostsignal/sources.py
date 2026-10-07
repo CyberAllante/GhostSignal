@@ -23,6 +23,16 @@ RETAILERS = {
     "wholefoods": ("Whole Foods", "https://www.wholefoodsmarket.com/search?text={q}"),
     "kohls":      ("Kohl's",      "https://www.kohls.com/search.jsp?search={q}"),
     "dollartree": ("Dollar Tree", "https://www.dollartree.com/searchresults?Ntt={q}"),
+    "kroger":     ("Kroger",      "https://www.kroger.com/search?query={q}"),
+    "meijer":     ("Meijer",      "https://www.meijer.com/shopping/search.html?text={q}"),
+    "bjs":        ("BJ's",        "https://www.bjs.com/search/{q}"),
+    "dollargeneral": ("Dollar General", "https://www.dollargeneral.com/search?q={q}"),
+    "fivebelow":  ("Five Below",  "https://www.fivebelow.com/search?q={q}"),
+    "ollies":     ("Ollie's",     "https://www.ollies.us/search?q={q}"),
+    "tjmaxx":     ("TJ Maxx",     "https://tjmaxx.tjx.com/store/shop?q={q}"),
+    "ulta":       ("Ulta",        "https://www.ulta.com/search?search={q}"),
+    "petsmart":   ("PetSmart",    "https://www.petsmart.com/search/?q={q}"),
+    "michaels":   ("Michaels",    "https://www.michaels.com/search?q={q}"),
     "google":     ("Google Shopping", "https://www.google.com/search?tbm=shop&q={q}"),
 }
 

@@ -252,6 +252,10 @@ def make_handler(db_path):
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
                 if url.path == "/api/invites":
                     return self._send(200, invites.listing(conn))
+                if url.path == "/api/stores/budget":
+                    from . import stores
+                    return self._send(200, {"configured": stores.configured(),
+                                            "left": stores.searches_left() if stores.configured() else None})
                 if url.path == "/api/holidays":
                     from . import holidays
                     return self._send(200, holidays.upcoming())
