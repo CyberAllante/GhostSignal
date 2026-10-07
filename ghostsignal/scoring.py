@@ -276,6 +276,11 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
 
     if amazon_only and verdict != "PASS":
         verdict = "PASS"
+    # A store price whose size we couldn't confirm can't make a BUY on its own.
+    if best and "size not stated" in (best.get("note") or ""):
+        flags.append(f"Store price at {best['retailer']} is unverified (size not stated): confirm it's the same size before buying")
+        if verdict == "BUY":
+            verdict = "RESEARCH"
     # Gating overrides: never tell you to BUY something you can't list.
     if gated in ("blocked", "limited") and econ.best_channel is None:
         verdict = "PASS"

@@ -101,6 +101,38 @@ def search_lens(image_url: str) -> list[dict]:
     return out
 
 
+_SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(fl\.?\s*oz|oz|ounces?|lbs?|pounds?|kg|g|grams?|ml|l|liters?|ct|count|pk|pack|packs|pcs|pieces|rolls?|bags?|bars?)\b", re.I)
+_TO_OZ = {"oz": 1, "ounce": 1, "ounces": 1, "lb": 16, "lbs": 16, "pound": 16, "pounds": 16, "kg": 35.274, "g": 0.035274,
+          "gram": 0.035274, "grams": 0.035274}
+_COUNT = {"ct", "count", "pk", "pack", "packs", "pcs", "pieces", "roll", "rolls", "bag", "bags", "bar", "bars"}
+
+
+def sizes(title: str) -> dict:
+    """{'oz': total weight in oz, 'ml': volume, 'count': biggest count} pulled from a product title."""
+    out: dict = {}
+    for num, unit in _SIZE.findall((title or "").lower().replace("fl. oz", "floz")):
+        n, u = float(num), re.sub(r"[\s.]", "", unit)
+        if u.startswith("floz") or u in ("ml", "l", "liter", "liters"):
+            out["ml"] = n * (29.5735 if u.startswith("floz") else 1000 if u.startswith("l") else 1)
+        elif u in _TO_OZ:
+            out["oz"] = max(out.get("oz", 0), n * _TO_OZ[u])
+        elif u in _COUNT:
+            out["count"] = max(out.get("count", 0), n)
+    return out
+
+
+def same_size(a: str, b: str) -> bool | None:
+    """True/False when both titles state a comparable size; None when we can't tell."""
+    sa, sb = sizes(a), sizes(b)
+    verdict = None
+    for k in ("oz", "ml", "count"):
+        if k in sa and k in sb:
+            if abs(sa[k] - sb[k]) / max(sa[k], sb[k]) > 0.04:
+                return False
+            verdict = True
+    return verdict
+
+
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
     """Cheapest close match per store."""
     best: dict[str, dict] = {}
@@ -113,47 +145,81 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) 
         # Lens already matched the photo, so its (often shorter) store titles need less word overlap.
         if match < (0.3 if r.get("via") == "lens" else min_match):
             continue
+        size_ok = same_size(amazon_title, r.get("title", ""))
+        if size_ok is False:          # 18 oz bag vs the 32 oz listing: not the same product
+            continue
         if key not in best or price < best[key]["price"]:
             best[key] = {"retailer": key, "price": float(price), "title": r.get("title", ""),
                          "url": r.get("link") or r.get("product_link") or "", "match": round(match, 2),
-                         "via": r.get("via", "shopping")}
+                         "via": r.get("via", "shopping"), "size_ok": size_ok}
     return sorted(best.values(), key=lambda o: o["price"])
 
 
-def find_prices(conn, asins: list[str]) -> dict:
+def searches_left() -> int | None:
+    """SerpAPI searches left this month (the account endpoint itself is free)."""
+    try:
+        with urllib.request.urlopen(f"https://serpapi.com/account.json?api_key={os.environ['SERPAPI_KEY']}", timeout=30) as r:
+            return int(json.loads(r.read()).get("total_searches_left"))
+    except Exception:
+        return None
+
+
+def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
+    """Cheapest matching store offers per product. Spends as few searches as possible: barcode/title shopping
+    search first, title-only retry, and the image (Lens) search only when nothing matched. Stops at `budget`."""
     location = db.get_setting(conn, "location")
-    searched = saved = 0
+    left = searches_left()
+    reserve = int(os.environ.get("SERPAPI_RESERVE", "10"))      # keep a few for manual "Find store prices"
+    if budget is None:
+        spare = max(0, left - reserve) if left is not None else 10
+        if len(asins) > 1:   # automatic runs: spread what's left over the rest of the month
+            import calendar
+            from datetime import date
+            today = date.today()
+            days_left = calendar.monthrange(today.year, today.month)[1] - today.day + 1
+            spare = -(-spare // days_left)   # ceil
+        budget = spare
+    searched = saved = used = 0
     for asin in asins:
+        if used >= budget:
+            break
         p = conn.execute("SELECT title, upc, image_url FROM products WHERE asin = ?", (asin,)).fetchone()
         if not p or not p["title"]:
             continue
-        results = search_lens(p["image_url"]) if p["image_url"] else []
-        results += search(search_query(p["title"], p["upc"]), location)
-        offers = pick_offers(results, p["title"])
-        if not offers and p["upc"]:  # some stores don't index UPCs; retry by title
-            offers = pick_offers(search(search_query(p["title"]), location), p["title"])
+        offers = pick_offers(search(search_query(p["title"], p["upc"]), location), p["title"]); used += 1
+        if not offers and p["upc"] and used < budget:      # some stores don't index barcodes; retry by title
+            offers = pick_offers(search(search_query(p["title"]), location), p["title"]); used += 1
+        if not offers and p["image_url"] and used < budget:
+            offers = pick_offers(search_lens(p["image_url"]), p["title"]); used += 1
         searched += 1
         for o in offers[:6]:
             db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
-                          note=f"{o['via']} · {int(o['match'] * 100)}% match: {o['title'][:120]} — check pack size")
+                          note=f"{o['via']} · {int(o['match'] * 100)}% match"
+                               + (" · same size" if o.get("size_ok") else " · size not stated, check it")
+                               + f": {o['title'][:120]}")
             saved += 1
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"prices_checked:{asin}", db.now()))
         conn.commit()
-    return {"searched": searched, "prices_saved": saved}
+    return {"searched": searched, "prices_saved": saved, "searches_used": used, "searches_left_before": left}
 
 
-def due_for_check(conn, limit: int = 50, days: float = 7) -> list[str]:
-    """Live products whose prices haven't been auto-checked in `days`, best candidates first."""
+def due_for_check(conn, limit: int = 8, days: float = 14) -> list[str]:
+    """Only real candidates get a (scarce) store-price search: sellable or one approval away, not junk, not an
+    Amazon-only brand, Amazon not on the listing, selling (rank <= 80k) and $18+. Best first, not checked lately."""
     from datetime import datetime, timedelta, timezone
+    from . import engine
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    rows = conn.execute(
-        """SELECT p.asin FROM products p
-           LEFT JOIN settings s ON s.key = 'prices_checked:' || p.asin
-           LEFT JOIN (SELECT asin, MAX(id) mid FROM signals GROUP BY asin) l ON l.asin = p.asin
-           LEFT JOIN signals g ON g.id = l.mid
-           WHERE p.status NOT IN ('dead','pass') AND p.title IS NOT NULL
-             AND (s.value IS NULL OR s.value < ?)
-           ORDER BY COALESCE(g.score, 0) DESC LIMIT ?""",
-        (cutoff, limit),
-    ).fetchall()
-    return [r[0] for r in rows]
+    checked = {r[0][len("prices_checked:"):]: r[1] for r in conn.execute(
+        "SELECT key, value FROM settings WHERE key LIKE 'prices_checked:%'")}
+    picks = []
+    for (asin,) in conn.execute("SELECT asin FROM products WHERE status NOT IN ('dead','pass') AND title IS NOT NULL"):
+        if checked.get(asin, "") >= cutoff:
+            continue
+        v = engine.list_view(conn, asin)
+        s, e = v["snapshot"] or {}, v["economics"]
+        if v["restricted"] or v["gated"] not in ("ungated", "approval") or (v.get("enrichment") or {}).get("sold_in_stores") is False:
+            continue
+        if s.get("amazon_price") or not s.get("sales_rank") or s["sales_rank"] > 80_000 or (e.get("sale_price") or 0) < 18:
+            continue
+        picks.append(((1 if v["gated"] == "ungated" else 0), -s["sales_rank"], asin))
+    return [a for *_, a in sorted(picks, reverse=True)[:limit]]

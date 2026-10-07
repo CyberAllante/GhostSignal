@@ -160,7 +160,7 @@ def cmd_score(a):
             print(engine.format_alert(c), end="\n\n")
 
 
-def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
+def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 8):
     """Everything `gs run` does. Each step only runs if its key is connected."""
     import os
     if os.environ.get("KEEPA_API_KEY"):

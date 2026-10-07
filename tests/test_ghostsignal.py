@@ -535,3 +535,22 @@ def test_enrich_default_selection_and_pipeline_survives_step_failure(conn, monke
     enrich.enrich(conn)                              # no asins given: picks un-enriched products itself
     assert [i["asin"] for i in seen["items"]] == ["B000000071"]
     assert cli._step("boom", lambda: 1 / 0) is None   # a broken optional step is logged, not raised
+
+
+def test_store_match_rejects_different_sizes():
+    from ghostsignal.stores import same_size, pick_offers
+    A = "Peets Coffee, Major Dickason's Blend, Whole Bean 32oz Bag, Dark Roast"
+    assert same_size(A, "Peet's Major Dickason's 18 oz") is False
+    assert same_size(A, "Peet's Major Dickason's Whole Bean 2 lb") is True       # 2 lb == 32 oz
+    assert same_size(A, "Peet's Major Dickason's whole bean") is None
+    res = [{"source": "Walmart", "extracted_price": 15.97, "title": "Peet's Coffee Major Dickason's Blend Whole Bean 18 oz"},
+           {"source": "Costco", "extracted_price": 24.99, "title": "Peet's Coffee Major Dickason's Blend Whole Bean 2 lb"}]
+    offers = pick_offers(res, A)
+    assert [o["retailer"] for o in offers] == ["costco"] and offers[0]["size_ok"] is True
+
+
+def test_unverified_size_store_price_caps_at_research():
+    snap = {"buy_box": 30.0, "avg_price_90": 29.0, "monthly_sold": 500, "offer_count": 5, "fba_fee": 4.0}
+    src = [{"retailer": "samsclub", "price": 10.0, "pack_qty": 1, "in_stock": 1, "note": "shopping · 82% match · size not stated, check it: x"}]
+    s = score_product({}, snap, src, {"orders": 3, "buyers": 3, "repeat_buyers": 1}, eligibility={"status": "ungated"})
+    assert s.verdict == "RESEARCH" and any("unverified" in f for f in s.flags)
