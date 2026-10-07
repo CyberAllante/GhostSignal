@@ -419,6 +419,18 @@ def t_spend(conn, a):
     return "Amazon spend from imported order history:\n" + "\n".join(lines) + f"\nTotal: {_money(sum(v['spend'] for v in rows.values()))}"
 
 
+def t_discover(conn, a):
+    from . import discover
+    from .server import discover_in_background, is_running
+    if is_running():
+        return "A data run is already going. Try again when `status` shows it finished."
+    discover_in_background(_path(conn), groups=a.get("groups"), brands=a.get("brands"), keywords=a.get("keywords"),
+                           pages=int(a.get("pages") or 2))
+    what = a.get("brands") or a.get("keywords") or a.get("groups") or list(discover.SEEDS)
+    return (f"Started discovery for {', '.join(what)[:300]}. New products get market data, gating and scores in the same run "
+            "(can take 20+ minutes for a big batch). Then use `picks` or `search`.")
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -467,6 +479,10 @@ TOOLS = {
     "set_approval": _tool(t_set_approval, "Track an ungating application for a category or brand (name exactly as in ungate_targets).",
                           {"name": S, "status": {"type": "string", "enum": ["not_started", "applying", "approved", "rejected"]}, "note": S}, ["name", "status"]),
     "spend": _tool(t_spend, "How much each imported buyer has spent on Amazon (from order totals)."),
+    "discover": _tool(t_discover, "Find NEW products: search Amazon's catalog for store brands in the user's open categories "
+                      "(groups: grocery, books, toys_plush, home, office_school, pet, beauty_health) or given brands/keywords.",
+                      {"groups": {"type": "array", "items": S}, "brands": {"type": "array", "items": S},
+                       "keywords": {"type": "array", "items": S}, "pages": I}),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

@@ -475,3 +475,14 @@ def test_not_eligible_split_into_limited_vs_closed(conn):
     from ghostsignal import ungate
     g = ungate.targets(conn)["limited"]
     assert g[0]["name"] == "Pyrex" and g[0]["items"][0]["asin"] == "B000000031"
+
+
+def test_discover_adds_ranked_products_only(conn, monkeypatch):
+    from ghostsignal import discover
+    fake = [{"asin": "B000000041", "title": "Plush A", "brand": "Squishmallows", "category": "Toys & Games", "image_url": "", "sales_rank": 1700},
+            {"asin": "B000000042", "title": "Plush B", "brand": "Squishmallows", "category": "Toys & Games", "image_url": "", "sales_rank": None},
+            {"asin": "B000000043", "title": "Plush C", "brand": "Squishmallows", "category": "Toys & Games", "image_url": "", "sales_rank": 900000}]
+    monkeypatch.setattr(discover, "search", lambda kw, brand=None, pages=2: fake)
+    r = discover.run(conn, brands=["Squishmallows"])
+    assert r == {"queries": 1, "seen": 3, "added": 1, "skipped_slow_or_unranked": 2}
+    assert conn.execute("SELECT origin FROM products WHERE asin='B000000041'").fetchone()[0] == "brand:Squishmallows"

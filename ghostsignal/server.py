@@ -60,6 +60,26 @@ def refresh_in_background(db_path, stale_days=None):
     threading.Thread(target=work, daemon=True).start()
 
 
+def discover_in_background(db_path, **kw):
+    """Search the catalog for new products, then run the normal pipeline on them (gating, market data, scores)."""
+    def work():
+        if not _run_lock.acquire(blocking=False):
+            return
+        try:
+            from . import discover
+            from .cli import run_pipeline
+            c = db.connect(db_path)
+            print("discover:", discover.run(c, **kw), flush=True)
+            run_pipeline(c)
+            c.close()
+            _invalidate_lists()
+        except Exception as e:
+            print("discover failed:", e, flush=True)
+        finally:
+            _run_lock.release()
+    threading.Thread(target=work, daemon=True).start()
+
+
 def is_running() -> bool:
     return _run_lock.locked()
 
@@ -570,6 +590,12 @@ def make_handler(db_path):
                 if url.path == "/api/demo/clear":
                     from .demo import clear_demo
                     return self._send(200, {"removed": clear_demo(conn)})
+                if url.path == "/api/discover":
+                    if is_running():
+                        return self._send(200, {"started": False, "running": True})
+                    discover_in_background(db_path, groups=body.get("groups"), brands=body.get("brands"),
+                                           keywords=body.get("keywords"), pages=int(body.get("pages") or 2))
+                    return self._send(200, {"started": True, "running": True})
                 if url.path == "/api/refresh":      # pull fresh data from every connected source, in the background
                     if is_running():
                         return self._send(200, {"started": False, "running": True})

@@ -422,6 +422,7 @@ async function pageProducts(params) {
     <div class="page-head"><div><h1>Products</h1><p>Every product you're watching. Click a row for details.</p></div>
       <div class="actions">
         <button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button>
+        <button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button>
         <button class="btn" onclick="openClean()">${icon("x")}Clean up</button>
         <button class="btn" onclick="copyAsins()">${icon("copy")}Copy ASINs</button>
         <a class="btn" href="/api/export.csv">${icon("dl")}Export</a>
@@ -837,6 +838,10 @@ function openAdd() { $("#dlgAdd").showModal(); }
 async function copyAsins() {
   const t = await api("/api/asins");
   await navigator.clipboard.writeText(t); toast(`${t.trim().split("\n").filter(Boolean).length} ASINs copied. Paste into Stealth Seller or Keepa.`);
+}
+async function discoverMore() {
+  const r = await api("/api/discover", {});
+  toast(r.started ? "Searching Amazon for store brands in your categories. New products show up as they're checked (20+ min)." : "A data run is already going. Try again when it finishes.");
 }
 async function scan() {
   const r = await api("/api/refresh", {});
