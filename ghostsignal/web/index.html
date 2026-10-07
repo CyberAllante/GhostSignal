@@ -243,6 +243,7 @@
   </div>
   <nav id="nav">
     <a href="#/dashboard" data-p="dashboard"><svg class="i"><use href="#i-dash"/></svg><span class="label">Dashboard</span></a>
+    <a href="#/hot" data-p="hot"><svg class="i"><use href="#i-scan"/></svg><span class="label">Hot</span><span class="badge" id="navHot"></span></a>
     <a href="#/products" data-p="products"><svg class="i"><use href="#i-box"/></svg><span class="label">Products</span><span class="badge" id="navProducts"></span></a>
     <a href="#/inventory" data-p="inventory"><svg class="i"><use href="#i-cart"/></svg><span class="label">Inventory</span><span class="badge" id="navInv"></span></a>
     <a href="#/sellers" data-p="sellers"><svg class="i"><use href="#i-users"/></svg><span class="label">Sellers</span><span class="badge" id="navSellers"></span></a>
@@ -349,6 +350,50 @@ async function loadProducts(force) {
 }
 const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><div class="top"><span class="chip ${c}">${icon(ic)}</span><svg class="i" style="color:#d1d5db;width:16px"><use href="#i-arrow"/></svg></div><div class="n">${n}</div><div class="l">${l}</div></a>`;
 
+/* ---------- hot list: the playbook's filters, live ---------- */
+const HOT_RULES = "You can sell it (or one approval away) · real store brand, not Amazon-only · Amazon not selling it · 2+ sellers so the Buy Box rotates · sells for $18+ · ranked under 80,000";
+function isLead(p) {
+  const s = p.snapshot || {}, e = p.economics;
+  return !p.restricted && (p.gated === "ungated" || p.gated === "approval")
+    && p.enrichment?.sold_in_stores !== false && !s.amazon_price
+    && (s.offer_count || 0) >= 2 && (e.sale_price || 0) >= 18 && s.sales_rank && s.sales_rank <= 80000;
+}
+function hotTiers(list) {
+  const leads = list.filter(isLead).sort((a, b) => (a.snapshot.sales_rank) - (b.snapshot.sales_rank));
+  const hasGap = (p) => p.best_source && p.economics.max_cost != null && p.best_source.price <= p.economics.max_cost;
+  return {
+    bangers: leads.filter((p) => p.gated === "ungated" && hasGap(p) && p.best_source.verified),
+    check: leads.filter((p) => p.gated === "ungated" && hasGap(p) && !p.best_source.verified),
+    leads: leads.filter((p) => p.gated === "ungated" && !hasGap(p)),
+    approval: leads.filter((p) => p.gated === "approval"),
+  };
+}
+function hotRow(p) {
+  const s = p.snapshot || {}, e = p.economics, b = p.best_source;
+  const store = b ? `${fav(b.retailer)}${esc(b.retailer)} ${money(b.price)}${b.verified ? "" : ` <span class="dim">(size?)</span>`}` : `<span class="dim">no store price yet</span>`;
+  return `<tr class="click" data-asin="${p.asin}">
+    <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}</div></div></div></td>
+    <td class="num">${money(e.sale_price)}</td><td class="num">#${num(s.sales_rank)}</td><td class="num">${s.offer_count ?? "—"}${s.fba_offers != null ? ` <span class="dim">(${s.fba_offers} FBA)</span>` : ""}</td>
+    <td class="num"><b>${money(e.max_cost)}</b>${e.fbm?.max_cost != null ? `<div class="dim" style="font-size:11px">FBM ${money(e.fbm.max_cost)}</div>` : ""}</td>
+    <td>${store}</td><td class="num ${cls(e.profit)}">${e.profit != null ? money(e.profit) : "—"}</td></tr>`;
+}
+async function pageHot() {
+  const seq = routeSeq;
+  await loadProducts();
+  const t = hotTiers(products);
+  $("#navHot").textContent = (t.bangers.length + t.check.length) || "";
+  const section = (title, sub, rows, empty) => `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Sells</th><th class="num">Rank</th><th class="num">Sellers</th><th class="num">Buy under</th><th>Best store price</th><th class="num">Profit</th></tr></thead>
+    <tbody>${rows.length ? rows.slice(0, 100).map(hotRow).join("") : `<tr><td colspan="7"><div class="empty">${empty}</div></td></tr>`}</tbody></table></div></div>`;
+  if (!paint(seq, `
+    <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.</p></div>
+      <div class="actions"><button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
+    ${section("🔥 Bangers", "Store price is under your max cost and the size is confirmed. Go buy.", t.bangers, "None yet. Store prices are checked about 10 products a day on your SerpAPI plan.")}
+    ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
+    ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
+    ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
+}
+
 const sub = (p) => {
   const e = p.economics, s = p.snapshot || {}, bits = [];
   if (e.sale_price) bits.push(`Sells ${money(e.sale_price)}`);
@@ -365,7 +410,8 @@ async function pageDashboard() {
   const count = (g) => live.filter((p) => p.gated === g).length;
   const withData = live.filter((p) => p.economics.sale_price).length;
   const rankOf = (p) => p.snapshot?.sales_rank || 1e12;
-  const sellNow = live.filter((p) => p.gated === "ungated").sort((a, b) => (b.priority ?? b.score) - (a.priority ?? a.score)).slice(0, 8);
+  const tiers = hotTiers(live);
+  const sellNow = [...tiers.bangers, ...tiers.check, ...tiers.leads].slice(0, 8);
   ungateData = ung;
   const approvals = [...ung.categories.map((g) => ({ ...g, kind: "Category" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "Brand" }))]
     .sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
@@ -385,8 +431,8 @@ async function pageDashboard() {
       ${statCard("purple", "users", stats.orders, `Order lines · ${stats.buyers} ${stats.buyers === 1 ? "buyer" : "buyers"}`, "#/products?v=")}
     </div>
     <div class="grid2">
-      <div class="card"><div class="card-h"><div><h2>Best you can sell now</h2><p>Ungated for your account, highest demand first</p></div><a class="btn sm" href="#/products?g=ungated">View all</a></div>
-        <div class="card-b">${sellNow.length ? sellNow.map(row).join("") : `<div class="empty">Nothing ungated yet. Refresh data to run the gated check.</div>`}</div></div>
+      <div class="card"><div class="card-h"><div><h2>Hot right now</h2><p>${tiers.bangers.length} bangers · ${tiers.check.length} to size-check · ${tiers.leads.length} leads · ${tiers.approval.length} one approval away</p></div><a class="btn sm" href="#/hot">Open Hot</a></div>
+        <div class="card-b">${sellNow.length ? sellNow.map(row).join("") : `<div class="empty">Nothing passes the filters yet. Open Hot to see what's one approval away.</div>`}</div></div>
       <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
         <div class="card"><div class="card-h"><div><h2>Approvals worth getting</h2><p>Unlock the most strong products</p></div><a class="btn sm" href="#/ungate">Open</a></div>
           <div class="card-b">${approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" data-group="${esc(g.name)}" data-kind="${g.kind === "Category" ? "categories" : "brands"}" style="color:inherit;text-decoration:none">
@@ -880,7 +926,7 @@ $("#sellerGo").onclick = async () => {
 };
 
 /* ---------- routing ---------- */
-const PAGES = { dashboard: pageDashboard, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, friends: pageFriends, setup: pageSetup };
+const PAGES = { dashboard: pageDashboard, hot: pageHot, products: pageProducts, inventory: pageInventory, sellers: pageSellers, ungate: pageUngate, friends: pageFriends, setup: pageSetup };
 function current() { const [p, qs] = (location.hash.slice(2) || "dashboard").split("?"); return [PAGES[p] ? p : "dashboard", new URLSearchParams(qs || "")]; }
 function rerender() { const [p] = current(); if (p === "products") renderTable(); else if (p === "dashboard") pageDashboard(); else if (p === "inventory") pageInventory(); }
 async function route() {

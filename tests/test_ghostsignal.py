@@ -555,3 +555,11 @@ def test_unverified_size_store_price_caps_at_research():
     src = [{"retailer": "samsclub", "price": 10.0, "pack_qty": 1, "in_stock": 1, "note": "shopping · 82% match · size not stated, check it: x"}]
     s = score_product({}, snap, src, {"orders": 3, "buyers": 3, "repeat_buyers": 1}, eligibility={"status": "ungated"})
     assert s.verdict == "RESEARCH" and any("unverified" in f for f in s.flags)
+
+
+def test_amazon_detected_by_its_offer_seller_id():
+    from ghostsignal import spapi
+    payload = {"Summary": {"BuyBoxPrices": [{"condition": "New", "LandedPrice": {"Amount": 5.68}}],
+                           "NumberOfOffers": [{"condition": "new", "fulfillmentChannel": "Amazon", "OfferCount": 1}]},
+               "Offers": [{"SellerId": "A2R2RITDJNW1Q6", "IsBuyBoxWinner": True, "ListingPrice": {"Amount": 5.68}}]}
+    assert spapi.parse_offers(payload)["amazon_price"] == 5.68

@@ -157,7 +157,9 @@ def update_fees(conn, asins: list[str]) -> int:
 
 # ---------------------------------------------------------------- market data (Keepa stand-in)
 
-AMAZON_SELLER_ID = "ATVPDKIKX0DER"   # Amazon.com's own seller ID in the US marketplace
+# Amazon's own retail seller IDs as they appear in offer data. Verified 10/7 against Echo Dot, Charmin, Tide,
+# Pringles, Bounty listings (all A2R2RITDJNW1Q6); ATVPDKIKX0DER is the marketplace ID, kept for older data.
+AMAZON_SELLER_IDS = {"A2R2RITDJNW1Q6", "ATVPDKIKX0DER"}
 _CARRY = ("avg_price_90", "monthly_sold", "referral_pct", "fba_fee", "ebay_sold_price")
 
 
@@ -214,7 +216,7 @@ def parse_offers(payload: dict) -> dict:
             continue
         by_channel["fba" if str(n.get("fulfillmentChannel", "")).lower() == "amazon" else "fbm"] += int(n.get("OfferCount") or 0)
     total = by_channel["fba"] + by_channel["fbm"] or summ.get("TotalOfferCount")
-    amazon = next((o for o in offers if o.get("SellerId") == AMAZON_SELLER_ID), None)
+    amazon = next((o for o in offers if o.get("SellerId") in AMAZON_SELLER_IDS), None)
     return {"buy_box": buy_box, "offer_count": total, "fba_offers": by_channel["fba"], "fbm_offers": by_channel["fbm"],
             "amazon_price": ((_amt(amazon.get("ListingPrice")) or 0) + (_amt(amazon.get("Shipping")) or 0)) or None
             if amazon else None}

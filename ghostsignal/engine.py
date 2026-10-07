@@ -206,9 +206,10 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "verdict": sig.verdict, "score": sig.score, "gated": sig.gated, "restricted": sig.restricted,
         "economics": {k: getattr(e, k, None) for k in ("sale_price", "cost", "max_cost", "profit", "roi", "best_channel",
                                                          "referral_fee", "fba_fee", "fbm")},
-        "snapshot": {k: s.get(k) for k in ("sales_rank", "monthly_sold", "offer_count", "captured_at", "amazon_price")} if s else None,
+        "snapshot": {k: s.get(k) for k in ("sales_rank", "monthly_sold", "offer_count", "fba_offers", "captured_at", "amazon_price")} if s else None,
         "orders": {"orders": orders.get("orders") or 0},
-        "best_source": {"retailer": sig.best_source["retailer"]} if sig.best_source else None,
+        "best_source": {"retailer": sig.best_source["retailer"], "price": sig.best_source.get("unit_cost"),
+                        "verified": "size not stated" not in (sig.best_source.get("note") or "")} if sig.best_source else None,
         "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores")} if enr else None,
         "eligibility": {"approval_url": el.get("approval_url"), "reason": el.get("reason"), "status": el.get("status")} if el else None,
     }
