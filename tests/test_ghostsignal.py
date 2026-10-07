@@ -512,3 +512,16 @@ def test_fees_only_refetched_when_stale(conn):
     assert cli._fees_due(conn) == ["B000000061"]
     db.add_snapshot(conn, "B000000061", "spapi-fees", buy_box=20.0, fba_fee=4.0)
     assert cli._fees_due(conn) == []
+
+
+def test_fbm_label_and_profit():
+    from ghostsignal.scoring import fbm_label_cost
+    assert fbm_label_cost(0.2) == 6.75 and fbm_label_cost(3) == 11.0 and fbm_label_cost(None) is None
+    e = economics(30.0, 10.0, referral_pct=0.15, fba_fee=5.0, weight_lb=0.8)
+    assert e.fbm == {"label": 9.5, "net": 16.0, "profit": 6.0, "roi": 0.6, "max_cost": round(16.0 / 1.3, 2)}
+    cheap = score_product({"weight_lb": 0.3}, {"buy_box": 9.99, "sales_rank": 500, "offer_count": 3}, [], {})
+    assert any("Too cheap to ship yourself" in f for f in cheap.flags)
+    from ghostsignal import spapi
+    item = {"asin": "B1", "summaries": [{"marketplaceId": "ATVPDKIKX0DER", "itemName": "x"}],
+            "dimensions": [{"marketplaceId": "ATVPDKIKX0DER", "package": {"weight": {"unit": "ounces", "value": 24}}}]}
+    assert spapi.parse_catalog_item(item)[0]["weight_lb"] == 1.5

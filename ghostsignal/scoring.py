@@ -54,6 +54,21 @@ class Economics:
     best_channel: str | None = None   # amazon | ebay | facebook
     facebook_profit: float | None = None
     channels: dict = field(default_factory=dict)   # per channel: price, net, profit, roi
+    fbm: dict | None = None           # ship it yourself: label, net, profit, roi, max_cost (needs weight)
+
+
+# Shipping label by package weight for FBM, from the Seller Syndicate playbook's commercial-rate table
+# (upper-middle of each range, to stay conservative). Size over ~14" on a side costs more; not modelled.
+FBM_LABEL_TIERS = [(0.25, 6.75), (0.5, 7.50), (0.75, 8.25), (1.0, 9.50), (2.0, 9.50), (5.0, 11.00), (10.0, 13.00)]
+
+
+def fbm_label_cost(weight_lb: float | None) -> float | None:
+    if not weight_lb:
+        return None
+    for limit, cost in FBM_LABEL_TIERS:
+        if weight_lb <= limit:
+            return cost
+    return round(14.0 + 0.6 * (weight_lb - 10), 2)
 
 
 @dataclass
@@ -78,7 +93,7 @@ def referral_rate(category: str | None, price: float, default: float = 0.15) -> 
 
 def economics(sale_price, cost, category=None, referral_pct=None, fba_fee=None,
               ebay_price=None, cfg: Config | None = None, facebook_price=None,
-              exclude: tuple = ()) -> Economics:
+              exclude: tuple = (), weight_lb: float | None = None) -> Economics:
     """Profit on every channel we have a price for; headline numbers = the best channel."""
     cfg = cfg or Config()
     channels: dict[str, dict] = {}
@@ -105,9 +120,17 @@ def economics(sale_price, cost, category=None, referral_pct=None, fba_fee=None,
     max_cost = round(best_net / (1 + cfg.target_roi), 2) if best_net and best_net > 0 else (0.0 if best else None)
     profit, roi = b.get("profit"), b.get("roi")
     margin = round(profit / b["price"], 3) if profit is not None else None
+    fbm = None
+    label = fbm_label_cost(weight_lb)
+    if sale_price and label is not None and "amazon" not in exclude:
+        net = round(sale_price - ref - label, 2)
+        fbm = {"label": label, "net": net,
+               "profit": round(net - cost, 2) if cost else None,
+               "roi": round((net - cost) / cost, 3) if cost else None,
+               "max_cost": round(net / (1 + cfg.target_roi), 2) if net > 0 else 0.0}
     return Economics(sale_price, cost, ref, fba, cfg.inbound_per_unit, amz_net, profit, roi, margin, max_cost,
                      channels.get("ebay", {}).get("profit"), best,
-                     channels.get("facebook", {}).get("profit"), channels)
+                     channels.get("facebook", {}).get("profit"), channels, fbm)
 
 
 def _clamp(x: float) -> float:
@@ -141,7 +164,8 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     gated = (eligibility or {}).get("status") or "unknown"
     econ = economics(sale, cost, product.get("category"), snap.get("referral_pct"), snap.get("fba_fee"),
                      cp.get("ebay") or snap.get("ebay_sold_price"), cfg, cp.get("facebook"),
-                     exclude=("amazon",) if gated in ("blocked", "limited") else ())
+                     exclude=("amazon",) if gated in ("blocked", "limited") else (),
+                     weight_lb=product.get("weight_lb"))
 
     # --- profit / ROI ---
     NAMES = {"amazon": "Amazon", "ebay": "eBay", "facebook": "Facebook Marketplace"}
@@ -156,6 +180,9 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
             reasons.append("Also: " + ", ".join(others))
     elif econ.max_cost:
         flags.append(f"No retail cost yet — buy under ${econ.max_cost:.2f} for {cfg.target_roi:.0%} ROI")
+
+    if econ.fbm and econ.fbm["max_cost"] < 3 and sale:
+        flags.append(f"Too cheap to ship yourself: a ~${econ.fbm['label']:.2f} label leaves ${econ.fbm['net']:.2f} (playbook: FBM items $20+)")
 
     # --- demand ---
     ms, rank = snap.get("monthly_sold"), snap.get("sales_rank")

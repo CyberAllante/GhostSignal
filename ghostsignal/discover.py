@@ -36,7 +36,7 @@ def search(keywords: str, brand: str | None = None, pages: int = 2) -> list[dict
     out, token = [], None
     for _ in range(pages):
         params = {"keywords": keywords, "marketplaceIds": spapi.MARKETPLACE_US,
-                  "includedData": "summaries,salesRanks,images,identifiers", "pageSize": 20}
+                  "includedData": "summaries,salesRanks,images,identifiers,dimensions", "pageSize": 20}
         if brand:
             params["brandNames"] = brand
         if token:
@@ -77,7 +77,7 @@ def run(conn, groups: list[str] | None = None, brands: list[str] | None = None, 
                 continue
             new = conn.execute("SELECT 1 FROM products WHERE asin = ?", (it["asin"],)).fetchone() is None
             db.upsert_product(conn, it["asin"], title=it["title"], brand=it["brand"], category=it["category"],
-                              image_url=it["image_url"], upc=it.get("upc"), origin=origin)
+                              image_url=it["image_url"], upc=it.get("upc"), weight_lb=it.get("weight_lb"), origin=origin)
             added += new
         conn.commit()
     return {"queries": len(queries), "seen": seen, "added": added, "skipped_slow_or_unranked": skipped}

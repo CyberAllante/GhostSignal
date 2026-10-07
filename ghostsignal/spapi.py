@@ -185,8 +185,12 @@ def parse_catalog_item(item: dict) -> tuple[dict, int | None, dict]:
     ids = pick(item.get("identifiers")).get("identifiers") or []
     by_type = {i.get("identifierType"): i.get("identifier") for i in ids}
     upc = by_type.get("UPC") or by_type.get("EAN") or by_type.get("GTIN")
+    dims = pick(item.get("dimensions"))
+    w = (dims.get("package") or {}).get("weight") or (dims.get("item") or {}).get("weight") or {}
+    to_lb = {"pounds": 1.0, "ounces": 1 / 16, "grams": 1 / 453.592, "kilograms": 2.20462}
+    weight_lb = round(float(w["value"]) * to_lb[w["unit"]], 3) if w.get("value") and w.get("unit") in to_lb else None
     product = {"title": summ.get("itemName"), "brand": summ.get("brand") or summ.get("manufacturer"),
-               "category": main_cat, "image_url": (main or {}).get("link"), "upc": upc}
+               "category": main_cat, "image_url": (main or {}).get("link"), "upc": upc, "weight_lb": weight_lb}
     return product, rank, {"sub_rank": sub.get("rank"), "sub_category": sub.get("title")}
 
 
@@ -219,7 +223,7 @@ def parse_offers(payload: dict) -> dict:
 def _catalog(asins: list[str]) -> dict:
     data = _call("GET", "/catalog/2022-04-01/items", {
         "identifiers": ",".join(asins), "identifiersType": "ASIN", "marketplaceIds": MARKETPLACE_US,
-        "includedData": "summaries,salesRanks,images,identifiers", "pageSize": 20})
+        "includedData": "summaries,salesRanks,images,identifiers,dimensions", "pageSize": 20})
     return {i["asin"]: i for i in data.get("items") or [] if i.get("asin")}
 
 

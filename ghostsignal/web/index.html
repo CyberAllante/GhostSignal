@@ -718,6 +718,7 @@ function drawer(p) {
         ${kv("Sell price", money(e.sale_price))}${kv("Max cost", money(e.max_cost))}${kv("Profit", money(e.profit), cls(e.profit))}
         ${kv("ROI", pct(e.roi), cls(e.roi))}${kv("Rank", num(s.sales_rank))}${kv("Sellers", s.offer_count ?? "—")}
       </div>
+      ${e.fbm ? `<div class="hint" style="margin-top:6px"><b>Ship it yourself (FBM):</b> ~${money(e.fbm.label)} label, you keep ${money(e.fbm.net)} before cost${e.fbm.profit != null ? ` · profit <b class="${cls(e.fbm.profit)}">${money(e.fbm.profit)}</b>` : ` · buy under <b>${money(e.fbm.max_cost)}</b>`}</div>` : ""}
       <div class="hint" style="margin-top:6px">${e.cost ? `Your cost ${money(e.cost)}` : "No store price yet"}${amz ? ` · Amazon fees ${money(amz)}` : ""}${s.monthly_sold ? ` · ${num(s.monthly_sold)}/mo` : ""}${others.length ? ` · ${others.join(", ")}` : ""}</div></div>
 
       <div class="sec"><h3>Why this score</h3><ul class="why">
