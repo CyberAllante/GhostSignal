@@ -530,6 +530,7 @@ def test_fbm_label_and_profit():
 def test_enrich_default_selection_and_pipeline_survives_step_failure(conn, monkeypatch):
     from ghostsignal import enrich, cli
     db.upsert_product(conn, "B000000071", title="Thing")
+    db.add_snapshot(conn, "B000000071", "spapi", buy_box=20.0, sales_rank=5000)
     seen = {}
     monkeypatch.setattr(enrich, "_ask", lambda items: seen.setdefault("items", items) and [])
     enrich.enrich(conn)                              # no asins given: picks un-enriched products itself

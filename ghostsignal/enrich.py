@@ -91,12 +91,26 @@ def _ask(items: list[dict]) -> list[dict]:
     return json.loads(text[start:end + 1]).get("products", [])
 
 
+def worth_analyzing(conn, force: bool = False, limit: int = 600) -> list[str]:
+    """Spend AI calls only where the answer can change a decision: products you can sell or are one approval away
+    from, that actually sell. Best first, capped per run."""
+    from . import engine
+    q = "SELECT p.asin FROM products p LEFT JOIN enrichment e ON e.asin = p.asin WHERE p.title IS NOT NULL AND p.status != 'dead'"
+    if not force:
+        q += " AND e.asin IS NULL"
+    picks = []
+    for (asin,) in conn.execute(q).fetchall():
+        v = engine.list_view(conn, asin)
+        rank = (v["snapshot"] or {}).get("sales_rank")
+        if v["restricted"] or v["gated"] not in ("ungated", "approval", "unknown") or not rank or rank > 150_000:
+            continue
+        picks.append((v.get("priority") or 0, asin))
+    return [a for _, a in sorted(picks, reverse=True)[:limit]]
+
+
 def enrich(conn, asins: list[str] | None = None, force: bool = False) -> int:
     if asins is None:
-        q = "SELECT p.asin FROM products p LEFT JOIN enrichment e ON e.asin = p.asin WHERE p.title IS NOT NULL"
-        if not force:
-            q += " AND e.asin IS NULL"
-        asins = [r[0] for r in conn.execute(q)]
+        asins = worth_analyzing(conn, force=force)
     done = 0
     for i in range(0, len(asins), BATCH):
         rows = conn.execute(
