@@ -76,7 +76,7 @@ def search(query: str, location: str | None = None) -> list[dict]:
               "api_key": os.environ["SERPAPI_KEY"]}
     if location:
         params["location"] = location
-    with urllib.request.urlopen(f"{API}?{urllib.parse.urlencode(params)}", timeout=60) as r:
+    with urllib.request.urlopen(f"{API}?{urllib.parse.urlencode(params)}", timeout=90) as r:
         data = json.loads(r.read())
     if data.get("error"):
         raise RuntimeError(data["error"])
@@ -87,7 +87,7 @@ def search_lens(image_url: str) -> list[dict]:
     """Google Lens visual matches for a product photo, normalized to the shopping shape."""
     params = {"engine": "google_lens", "url": image_url, "hl": "en", "country": "us",
               "api_key": os.environ["SERPAPI_KEY"]}
-    with urllib.request.urlopen(f"{API}?{urllib.parse.urlencode(params)}", timeout=60) as r:
+    with urllib.request.urlopen(f"{API}?{urllib.parse.urlencode(params)}", timeout=90) as r:
         data = json.loads(r.read())
     if data.get("error"):
         raise RuntimeError(data["error"])
@@ -164,6 +164,15 @@ def searches_left() -> int | None:
         return None
 
 
+def _safe(fn, *args) -> list[dict]:
+    """One slow or failed search shouldn't sink the whole price check."""
+    try:
+        return fn(*args)
+    except Exception as e:
+        print(f"  store search skipped: {str(e)[:120]}", flush=True)
+        return []
+
+
 def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
     """Cheapest matching store offers per product. Spends as few searches as possible: barcode/title shopping
     search first, title-only retry, and the image (Lens) search only when nothing matched. Stops at `budget`."""
@@ -186,11 +195,12 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
         p = conn.execute("SELECT title, upc, image_url FROM products WHERE asin = ?", (asin,)).fetchone()
         if not p or not p["title"]:
             continue
-        offers = pick_offers(search(search_query(p["title"], p["upc"]), location), p["title"]); used += 1
-        if not offers and p["upc"] and used < budget:      # some stores don't index barcodes; retry by title
-            offers = pick_offers(search(search_query(p["title"]), location), p["title"]); used += 1
+        # Title search is fast (~1s); barcode search can take 30s+, so it's the fallback, then the photo search.
+        offers = pick_offers(_safe(search, search_query(p["title"]), location), p["title"]); used += 1
+        if not offers and p["upc"] and used < budget:
+            offers = pick_offers(_safe(search, search_query(p["title"], p["upc"]), location), p["title"]); used += 1
         if not offers and p["image_url"] and used < budget:
-            offers = pick_offers(search_lens(p["image_url"]), p["title"]); used += 1
+            offers = pick_offers(_safe(search_lens, p["image_url"]), p["title"]); used += 1
         searched += 1
         for o in offers[:10]:
             db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
