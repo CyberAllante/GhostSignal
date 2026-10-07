@@ -123,7 +123,7 @@ def test_gating_overrides_verdict(conn):
         {"reasonCode": "APPROVAL_REQUIRED", "message": "Need approval",
          "links": [{"resource": "https://sellercentral.amazon.com/hz/approvalrequest?asin=X"}]}]}]})
     assert st == "approval" and url.startswith("https://sellercentral")
-    assert spapi.parse_restrictions({"restrictions": [{"reasons": [{"reasonCode": "NOT_ELIGIBLE"}]}]})[0] == "blocked"
+    assert spapi.parse_restrictions({"restrictions": [{"reasons": [{"reasonCode": "NOT_ELIGIBLE"}]}]})[0] == "limited"
     assert spapi.parse_fees({"payload": {"FeesEstimateResult": {"FeesEstimate": {"FeeDetailList": [
         {"FeeType": "ReferralFee", "FinalFee": {"Amount": 4.63}},
         {"FeeType": "FBAFees", "FinalFee": {"Amount": 4.95}}]}}}}) == (4.63, 4.95)
@@ -459,3 +459,19 @@ def test_priority_orders_sellable_before_blocked():
     mid = engine.priority({"gated": "approval", "verdict": "RESEARCH", "score": 90})
     lo = engine.priority({"gated": "blocked", "verdict": "PASS", "score": 0})
     assert hi > mid > lo and engine.priority({"restricted": "x", "gated": "ungated", "verdict": "BUY", "score": 99}) == -1
+
+
+def test_not_eligible_split_into_limited_vs_closed(conn):
+    from ghostsignal import spapi
+    lim = {"restrictions": [{"reasons": [{"reasonCode": "NOT_ELIGIBLE", "message": "This product has other listing limitations."},
+                                         {"reasonCode": "NOT_ELIGIBLE", "message": "You need approval to list in this brand."}]}]}
+    closed = {"restrictions": [{"reasons": [{"reasonCode": "NOT_ELIGIBLE", "message": "You are not approved to list this brand and we are currently not accepting applications."}]}]}
+    assert spapi.parse_restrictions(lim)[0] == "limited"
+    assert spapi.parse_restrictions(closed)[0] == "blocked"
+    db.upsert_product(conn, "B000000031", title="Pyrex bowl", brand="Pyrex")
+    db.set_eligibility(conn, "B000000031", "limited", "spapi", "This product has other listing limitations.; You need approval to list in this brand.")
+    v = engine.list_view(conn, "B000000031")
+    assert v["gated"] == "limited" and v["verdict"] == "PASS"
+    from ghostsignal import ungate
+    g = ungate.targets(conn)["limited"]
+    assert g[0]["name"] == "Pyrex" and g[0]["items"][0]["asin"] == "B000000031"

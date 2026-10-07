@@ -50,15 +50,19 @@ def _strong(v: dict) -> bool:
 def targets(conn) -> dict:
     cats: dict[str, list] = {}
     brands: dict[str, list] = {}
+    limited: dict[str, list] = {}
     closed = 0
     for (asin,) in conn.execute("SELECT asin FROM products WHERE status != 'dead'").fetchall():
         v = engine.list_view(conn, asin)
         el = v.get("eligibility") or {}
-        if v["gated"] == "blocked" and "not currently accepting" in (el.get("reason") or ""):
+        if v["gated"] == "blocked" and "not accepting applications" in (el.get("reason") or ""):
             closed += 1
+        reason = el.get("reason") or ""
+        if v["gated"] == "limited":
+            limited.setdefault(v["brand"] or "(brand unknown)", []).append(v)
+            continue
         if v["gated"] != "approval":
             continue
-        reason = el.get("reason") or ""
         for c in CAT_RE.findall(reason):
             cats.setdefault(c.strip(), []).append(v)
         if "approval to list in this brand" in reason:
@@ -76,11 +80,17 @@ def targets(conn) -> dict:
                         "median_price": round(statistics.median(prices), 2) if prices else None,
                         "examples": [(v["title"] or v["asin"])[:60] for v in sorted(
                             strong or items, key=lambda v: (v["snapshot"] or {}).get("sales_rank") or 10**9)[:3]],
-                        "approval_url": url})
+                        "approval_url": url,
+                        "items": [{"asin": v["asin"], "title": v["title"], "image_url": v["image_url"],
+                                   "sale_price": v["economics"].get("sale_price"), "max_cost": v["economics"].get("max_cost"),
+                                   "rank": (v["snapshot"] or {}).get("sales_rank"), "offers": (v["snapshot"] or {}).get("offer_count"),
+                                   "strong": _strong(v)}
+                                  for v in sorted(items, key=lambda v: -(v.get("priority") or 0))]})
         return sorted(out, key=lambda g: (-g["strong"], -g["products"]))
 
     track = approvals(conn)
-    out = {"categories": summarize(cats), "brands": summarize(brands), "closed_to_applications": closed}
-    for g in out["categories"] + out["brands"]:
+    out = {"categories": summarize(cats), "brands": summarize(brands), "limited": summarize(limited),
+           "closed_to_applications": closed}
+    for g in out["categories"] + out["brands"] + out["limited"]:
         g["tracking"] = track.get(g["name"], {"status": "not_started"})
     return out

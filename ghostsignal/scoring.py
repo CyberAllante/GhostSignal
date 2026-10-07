@@ -141,7 +141,7 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     gated = (eligibility or {}).get("status") or "unknown"
     econ = economics(sale, cost, product.get("category"), snap.get("referral_pct"), snap.get("fba_fee"),
                      cp.get("ebay") or snap.get("ebay_sold_price"), cfg, cp.get("facebook"),
-                     exclude=("amazon",) if gated == "blocked" else ())
+                     exclude=("amazon",) if gated in ("blocked", "limited") else ())
 
     # --- profit / ROI ---
     NAMES = {"amazon": "Amazon", "ebay": "eBay", "facebook": "Facebook Marketplace"}
@@ -211,7 +211,10 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
         flags.append("Gated — you need approval to sell this")
         penalty += 10
     elif gated == "blocked":
-        flags.append("You can't sell this on Amazon" + (" — eBay/Facebook only" if econ.best_channel else ""))
+        flags.append("You can't sell this on Amazon (brand closed to new sellers)" + (" — eBay/Facebook only" if econ.best_channel else ""))
+    elif gated == "limited":
+        flags.append("Not eligible on Amazon yet — needs approval and your account has listing limits; usually opens up with sales history"
+                     + (" — eBay/Facebook for now" if econ.best_channel else ""))
     elif e.get("gating_risk") == "high":
         flags.append("Likely gated — check eligibility before buying")
         penalty += 15
@@ -247,7 +250,7 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     if amazon_only and verdict != "PASS":
         verdict = "PASS"
     # Gating overrides: never tell you to BUY something you can't list.
-    if gated == "blocked" and econ.best_channel is None:
+    if gated in ("blocked", "limited") and econ.best_channel is None:
         verdict = "PASS"
     elif gated == "approval" and verdict == "BUY" and econ.best_channel == "amazon":
         verdict = "RESEARCH"

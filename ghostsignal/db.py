@@ -185,6 +185,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE tracked_sellers ADD COLUMN {col} {ddl}")
     if "order_total" not in {r["name"] for r in conn.execute("PRAGMA table_info(orders)")}:
         conn.execute("ALTER TABLE orders ADD COLUMN order_total REAL")   # whole-order total, repeated on each line
+    # one-time: older checks called every NOT_ELIGIBLE "blocked"; only closed brands really are
+    conn.execute("""UPDATE eligibility SET status = 'limited' WHERE source = 'spapi' AND status = 'blocked'
+                    AND lower(COALESCE(reason, '')) NOT LIKE '%not accepting applications%'""")
     inv = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)")}
     for col, ddl in (("pred_verdict", "TEXT"), ("pred_score", "INTEGER"), ("pred_profit", "REAL")):
         if col not in inv:
@@ -307,7 +310,7 @@ def last_signal(conn: sqlite3.Connection, asin: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-GATED_STATUSES = ("ungated", "approval", "blocked")
+GATED_STATUSES = ("ungated", "approval", "limited", "blocked")
 
 
 def set_eligibility(conn: sqlite3.Connection, asin: str, status: str, source: str = "manual",

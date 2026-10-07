@@ -41,7 +41,7 @@ def _line(v: dict) -> str:
     e, s = v["economics"], v["snapshot"] or {}
     ch = f" via {e['best_channel']}" if e.get("best_channel") else ""
     roi = f"{e['roi']:.0%}" if e.get("roi") is not None else "-"
-    gate = {"ungated": "can sell", "approval": "NEEDS APPROVAL", "blocked": "CAN'T SELL"}.get(v["gated"], "gating unchecked")
+    gate = {"ungated": "can sell", "approval": "NEEDS APPROVAL", "limited": "NOT ELIGIBLE YET", "blocked": "CAN'T SELL"}.get(v["gated"], "gating unchecked")
     return (f"{v['asin']} | {v['verdict']} {v['score']} | {(v['title'] or '')[:70]} | sell {_money(e['sale_price'])} "
             f"cost {_money(e['cost'])} profit {_money(e['profit'])}{ch} ROI {roi} | "
             f"{s.get('monthly_sold') or '-'}/mo | {(v['best_source'] or {}).get('retailer') or 'no store yet'} | {gate}")
@@ -296,7 +296,7 @@ def _live_views(conn):
 
 _GROUPS = {
     "restricted": lambda v: bool(v["restricted"]),
-    "cant_sell": lambda v: v["gated"] == "blocked" and not v["economics"].get("best_channel") and not v["restricted"],
+    "cant_sell": lambda v: v["gated"] in ("blocked", "limited") and not v["economics"].get("best_channel") and not v["restricted"],
     "pass": lambda v: v["verdict"] == "PASS",
 }
 
@@ -444,7 +444,7 @@ TOOLS = {
                           {"asin": S, "title": S, "brand": S, "category": S, "buy_box": N, "avg_price_90": N, "sales_rank": I,
                            "monthly_sold": I, "offer_count": I, "amazon_price": N, "ebay_sold_price": N, "fba_fee": N}, ["asin"]),
     "set_gated": _tool(t_set_gated, "Record whether the user can sell this on Amazon.",
-                       {"asin": S, "status": {"type": "string", "enum": ["ungated", "approval", "blocked"]}, "reason": S}, ["asin", "status"]),
+                       {"asin": S, "status": {"type": "string", "enum": ["ungated", "approval", "limited", "blocked"]}, "reason": S}, ["asin", "status"]),
     "set_status": _tool(t_set_status, "pass = not now (still rechecked slowly); dead = hide forever; watch/research/buy.",
                         {"asin": S, "status": {"type": "string", "enum": STATUSES}}, ["asin", "status"]),
     "note": _tool(t_note, "Save a research note on a product so it isn't redone.", {"asin": S, "text": S}, ["asin", "text"]),

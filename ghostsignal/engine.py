@@ -181,7 +181,7 @@ def product_view(conn, asin: str, cfg: Config | None = None) -> dict:
     }
 
 
-_GATE_RANK = {"ungated": 3, "unknown": 2, "approval": 1, "blocked": 0}
+_GATE_RANK = {"ungated": 4, "unknown": 3, "approval": 2, "limited": 1, "blocked": 0}
 _VERDICT_RANK = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 
 

@@ -92,11 +92,18 @@ def parse_restrictions(data: dict) -> tuple[str, str, str]:
                 if link.get("resource")), "")
     if "APPROVAL_REQUIRED" in codes:
         return "approval", msg, url
-    return "blocked", msg, url
+    return status_from_reason(msg), msg, url
+
+
+def status_from_reason(msg: str) -> str:
+    """NOT_ELIGIBLE splits two ways. 'Not currently accepting applications' means the brand is closed: blocked.
+    Anything else ('other listing limitations' + needs approval) is usually new-account limits that ease
+    with sales history: limited."""
+    return "blocked" if "not accepting applications" in (msg or "").lower() else "limited"
 
 
 def check_gated(conn, asins: list[str]) -> dict:
-    counts = {"ungated": 0, "approval": 0, "blocked": 0}
+    counts = {"ungated": 0, "approval": 0, "limited": 0, "blocked": 0}
     for asin in asins:
         data = _call("GET", "/listings/2021-08-01/restrictions", {
             "asin": asin, "sellerId": os.environ["SPAPI_SELLER_ID"],

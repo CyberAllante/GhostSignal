@@ -90,6 +90,7 @@
   .pill.BUY, .pill.ungated, .pill.active { background: var(--green-bg); color: var(--green); }
   .pill.RESEARCH, .pill.approval, .pill.paused { background: var(--amber-bg); color: var(--amber); }
   .pill.PASS, .pill.blocked { background: var(--red-bg); color: var(--red); }
+  .pill.limited { background: #f3f4f6; color: #6b7280; border: 1px dashed #d1d5db; }
   .pill.unknown { background: var(--row); color: var(--muted); }
   .pos { color: var(--green); } .neg { color: var(--red); } .dim { color: var(--faint); }
 
@@ -310,7 +311,7 @@ const num = (x) => (typeof x === "number" ? (x >= 1000 ? (x / 1000).toFixed(x >=
 const cls = (x) => (typeof x !== "number" ? "dim" : x > 0 ? "pos" : "neg");
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const LABEL = { BUY: "Buy", RESEARCH: "Research", PASS: "Pass" };
-const GATED = { ungated: "Ungated", approval: "Needs approval", blocked: "Can't sell", unknown: "Not checked" };
+const GATED = { ungated: "Ungated", approval: "Needs approval", limited: "Not eligible yet", blocked: "Can't sell", unknown: "Not checked" };
 let routeSeq = 0;
 const paint = (seq, html) => { if (seq === routeSeq) $("#main").innerHTML = html; return seq === routeSeq; };
 let products = [], view = { verdict: "", q: "", gated: "", cat: "", maxRank: "", minPrice: "", maxPrice: "", sort: "score", dir: -1 }, timer;
@@ -365,6 +366,7 @@ async function pageDashboard() {
   const withData = live.filter((p) => p.economics.sale_price).length;
   const rankOf = (p) => p.snapshot?.sales_rank || 1e12;
   const sellNow = live.filter((p) => p.gated === "ungated").sort((a, b) => (b.priority ?? b.score) - (a.priority ?? a.score)).slice(0, 8);
+  ungateData = ung;
   const approvals = [...ung.categories.map((g) => ({ ...g, kind: "Category" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "Brand" }))]
     .sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
   const row = (p) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}
@@ -387,7 +389,7 @@ async function pageDashboard() {
         <div class="card-b">${sellNow.length ? sellNow.map(row).join("") : `<div class="empty">Nothing ungated yet. Refresh data to run the gated check.</div>`}</div></div>
       <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
         <div class="card"><div class="card-h"><div><h2>Approvals worth getting</h2><p>Unlock the most strong products</p></div><a class="btn sm" href="#/ungate">Open</a></div>
-          <div class="card-b">${approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" style="color:inherit;text-decoration:none">
+          <div class="card-b">${approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" data-group="${esc(g.name)}" data-kind="${g.kind === "Category" ? "categories" : "brands"}" style="color:inherit;text-decoration:none">
             <div style="flex:1;min-width:0"><div class="t">${esc(g.name)}</div><div class="s">${g.kind} · ${g.products} products${g.strong ? ` · <b class="pos">${g.strong} strong</b>` : ""}</div></div></a>`).join("")
             : `<div class="hint">Run a data refresh so gating is checked.</div>`}</div></div>
         ${changes.length ? `<div class="card"><div class="card-h"><div><h2>Moved up</h2><p>Got better on the latest scan</p></div></div>
@@ -566,11 +568,35 @@ const SUPPLIERS = [
   ["Automotive", "Turn 14 Distribution"],
   ["Also named in the post", "Bangalla, EE Distribution, Frontline, Bilobeauty, Everest Toys, Round Eye Supply"],
 ];
+let ungateData = null, drawerBack = null;
+async function openGroup(kind, name) {
+  const t = ungateData || (ungateData = await api("/api/ungate"));
+  const g = (t[kind] || []).find((x) => x.name === name);
+  if (!g) return toast("Couldn't find that group");
+  const row = (it) => `<div class="mini-row" data-gasin="${it.asin}">${thumb(it)}
+      <div style="flex:1;min-width:0"><div class="t">${esc(it.title || it.asin)}</div>
+      <div class="s">${[it.sale_price ? `Sells ${money(it.sale_price)}` : "", it.rank ? `#${num(it.rank)}` : "", it.offers != null ? `${it.offers} sellers` : "", it.max_cost ? `buy under ${money(it.max_cost)}` : ""].filter(Boolean).join(" · ") || "No market data yet"}</div></div>
+      ${it.strong ? `<span class="pill BUY">Strong</span>` : ""}</div>`;
+  const label = { categories: "Category approval", brands: "Brand approval", limited: "Not eligible yet" }[kind];
+  $("#drawer").innerHTML = `
+    <div class="dh"><button class="btn sm x" id="closeBtn" aria-label="Close">${icon("x")}</button>
+      <div class="dim" style="font-size:12px">${label}</div>
+      <h2>${esc(g.name)}</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill unknown">${g.products} products</span>${g.strong ? `<span class="pill BUY">${g.strong} strong</span>` : ""}
+        ${g.approval_url ? `<a class="btn sm" href="${esc(g.approval_url)}" target="_blank" rel="noopener">Apply ↗</a>` : ""}</div></div>
+    <div class="db"><div class="sec">${g.items.map(row).join("")}</div>
+      ${kind === "limited" ? `<div class="hint">Amazon says these need approval and your account isn't eligible to apply yet. Sales history usually opens them up.</div>` : ""}</div>`;
+  $("#closeBtn").onclick = closeDrawer;
+  $("#drawer").querySelectorAll("[data-gasin]").forEach((r) => (r.onclick = () => { drawerBack = () => openGroup(kind, name); openDrawer(r.dataset.gasin); }));
+  $("#drawer").classList.add("open"); $("#scrim").classList.add("open"); $("#drawer").scrollTop = 0;
+}
+
 async function pageUngate() {
   const seq = routeSeq;
-  const t = await api("/api/ungate");
+  const t = ungateData = await api("/api/ungate");
+  const kindOf = (rows) => rows === t.categories ? "categories" : rows === t.brands ? "brands" : "limited";
   const table = (rows, label) => rows.length ? `<div class="table-wrap"><table><thead><tr><th>${label}</th><th>Your status</th><th class="num">Products</th><th class="num">Strong</th><th class="num">Best rank</th><th class="num">Median price</th><th>Examples</th><th></th></tr></thead><tbody>
-    ${rows.map((g) => `<tr><td><b>${esc(g.name)}</b>${g.tracking.note ? `<div class="dim" style="font-size:12px">${esc(g.tracking.note)}</div>` : ""}</td>
+    ${rows.map((g) => `<tr class="click" data-group="${esc(g.name)}" data-kind="${kindOf(rows)}"><td><b>${esc(g.name)}</b>${g.tracking.note ? `<div class="dim" style="font-size:12px">${esc(g.tracking.note)}</div>` : ""}</td>
       <td><select data-appr="${esc(g.name)}" style="padding:4px 6px;font-size:12px">${Object.entries(APPR).map(([k, l]) => `<option value="${k}" ${g.tracking.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></td>
       <td class="num">${g.products}</td><td class="num pos">${g.strong}</td><td class="num">${num(g.best_rank)}</td><td class="num">${money(g.median_price)}</td>
       <td class="dim" style="max-width:320px">${g.examples.map(esc).join(" · ")}</td>
@@ -593,7 +619,9 @@ async function pageUngate() {
         <div class="hint" style="margin-top:8px">From a Reddit list by a wholesale coach. Not verified. Commenters said Walgreens doesn't issue invoices, so it's left off. Confirm a supplier is authorized for the brand before you buy.</div>
       </div></details>
     <div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>Category approvals</h2><p>Strong = ranked under 50,000 and priced $10+</p></div></div><div class="card-b" style="padding:0">${table(t.categories, "Category")}</div></div>
-    <div class="card"><div class="card-h"><div><h2>Brand approvals</h2><p>${t.closed_to_applications} more products are in brands Amazon isn't accepting applications for right now</p></div></div><div class="card-b" style="padding:0">${table(t.brands, "Brand")}</div></div>`)) return;
+    <div class="card"><div class="card-h"><div><h2>Brand approvals</h2><p>${t.closed_to_applications} more products are in brands Amazon isn't accepting applications for right now</p></div></div><div class="card-b" style="padding:0">${table(t.brands, "Brand")}</div></div>
+    ${t.limited.length ? `<div class="card" style="margin-top:24px"><div class="card-h"><div><h2>Not eligible yet</h2><p>Need brand approval, but Amazon won't take an application from your account yet. These usually open up after you have sales.</p></div></div><div class="card-b" style="padding:0">${table(t.limited, "Brand")}</div></div>` : ""}`)) return;
+  $("#main").querySelectorAll("tr[data-group]").forEach((tr) => (tr.onclick = (e) => { if (e.target.closest("select,a")) return; openGroup(tr.dataset.kind, tr.dataset.group); }));
   $("#main").querySelectorAll("[data-appr]").forEach((sel) => (sel.onchange = async () => {
     await api("/api/approvals", { name: sel.dataset.appr, status: sel.value });
     toast(sel.value === "approved" ? "Marked approved. Re-checking those products now." : "Saved");
@@ -680,6 +708,7 @@ function drawer(p) {
   const amz = (e.referral_fee || 0) + (e.fba_fee || 0);
   $("#drawer").innerHTML = `
     <div class="dh"><button class="btn sm x" id="closeBtn" aria-label="Close">${icon("x")}</button>
+      ${drawerBack ? `<button class="btn sm" id="backBtn" style="margin-bottom:8px">← Back</button>` : ""}
       <div class="dim" style="font-size:12px">${esc(p.brand || "")}${p.brand ? " · " : ""}${p.asin}</div>
       <h2>${esc(p.title || p.asin)}</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${p.verdict}">${LABEL[p.verdict]} · ${p.score}/100</span>${gatedPill(p)}</div></div>
@@ -722,6 +751,7 @@ function drawer(p) {
       </details>
     </div>`;
   $("#closeBtn").onclick = closeDrawer;
+  if (drawerBack) $("#backBtn").onclick = () => { const b = drawerBack; drawerBack = null; b(); };
   const refresh = async (np, msg) => { drawer(np); toast(msg); await loadProducts(); rerender(); };
   $("#logForm").onsubmit = async (ev) => {
     ev.preventDefault();
@@ -749,13 +779,13 @@ function drawer(p) {
   }));
 }
 async function openDrawer(asin) { drawer(await api(`/api/products/${asin}`)); $("#drawer").classList.add("open"); $("#scrim").classList.add("open"); }
-function closeDrawer() { $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
+function closeDrawer() { drawerBack = null; $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); }
 
 /* ---------- actions ---------- */
 /* ---------- clean up ---------- */
 const CLEAN = [
   ["restricted", "Amazon-owned or blocked brands", "Amazon Basics, Solimo, Happy Belly and anything on your blocked list. Only Amazon (or you) can't sell these.", (p) => !!p.restricted],
-  ["cant", "You can't sell on any channel", "Marked Can't sell with no eBay or Facebook route.", (p) => p.gated === "blocked" && !p.economics.best_channel && !p.restricted],
+  ["cant", "You can't sell on any channel", "Marked Can't sell with no eBay or Facebook route.", (p) => (p.gated === "blocked" || p.gated === "limited") && !p.economics.best_channel && !p.restricted],
   ["pass", "Everything that scores Pass", "Includes the two above. Archived products are hidden, not deleted, and come back if you restore them.", (p) => p.verdict === "PASS"],
 ];
 async function openClean() {
@@ -855,7 +885,11 @@ async function route() {
   try { await PAGES[p](params); } catch (e) { $("#main").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
 }
 window.onhashchange = route;
-$("#main").addEventListener("click", (e) => { const r = e.target.closest("[data-asin]"); if (r) openDrawer(r.dataset.asin); });
+$("#main").addEventListener("click", (e) => {
+  const g = e.target.closest("a[data-group]");
+  if (g) { e.preventDefault(); openGroup(g.dataset.kind, g.dataset.group); return; }
+  const r = e.target.closest("[data-asin]"); if (r) { drawerBack = null; openDrawer(r.dataset.asin); }
+});
 $("#scrim").onclick = closeDrawer;
 document.onkeydown = (e) => { if (e.key === "Escape") closeDrawer(); };
 $("#miniBtn").onclick = () => document.body.classList.toggle("mini");
