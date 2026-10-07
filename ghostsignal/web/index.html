@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GhostSignal">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Chakra+Petch:ital,wght@1,700&display=swap" rel="stylesheet">
 <style>
   :root {
     --navy: #142C51; --navy-hover: rgba(255,255,255,.1); --navy-active: rgba(255,255,255,.2);
@@ -153,6 +153,9 @@
   .chip-store { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-decoration: none; background: #fff; white-space: nowrap; }
   .chip-store.under { border-color: #86efac; background: #f0fdf4; }
   .chip-store .fav { width: 12px; height: 12px; }
+  .mark-img { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+  .wordmark { font-family: 'Chakra Petch', Inter, sans-serif; font-style: italic; font-weight: 700; letter-spacing: .06em; font-size: 17px; color: #fff; white-space: nowrap; }
+  .wordmark span { color: #e11d2e; }
   .pimg { display: block; margin-top: 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
   .pimg img { max-width: 100%; max-height: 240px; object-fit: contain; display: inline-block; }
   details.edit { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -238,13 +241,13 @@
 </svg>
 
 <div class="topbar">
-  <div style="display:flex;align-items:center;gap:10px;font-weight:700"><span class="mark" style="width:28px;height:28px">G</span>GhostSignal</div>
+  <div style="display:flex;align-items:center;gap:10px;font-weight:700"><img src="/icon.svg" alt="" style="width:28px;height:28px;border-radius:7px"><span class="wordmark">GHOST<span>SIGNAL</span></span></div>
   <button class="collapse-btn" id="menuBtn" aria-label="Menu"><svg class="i"><use href="#i-menu"/></svg></button>
 </div>
 
 <aside class="side">
   <div class="brand">
-    <div class="logo"><span class="mark">G</span><span>GhostSignal</span></div>
+    <div class="logo"><img src="/icon.svg" alt="" class="mark-img"><span class="wordmark">GHOST<span>SIGNAL</span></span></div>
     <button class="collapse-btn" id="miniBtn" aria-label="Collapse sidebar"><svg class="i"><use href="#i-left"/></svg></button>
   </div>
   <nav id="nav">
