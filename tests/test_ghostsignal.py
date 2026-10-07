@@ -525,3 +525,13 @@ def test_fbm_label_and_profit():
     item = {"asin": "B1", "summaries": [{"marketplaceId": "ATVPDKIKX0DER", "itemName": "x"}],
             "dimensions": [{"marketplaceId": "ATVPDKIKX0DER", "package": {"weight": {"unit": "ounces", "value": 24}}}]}
     assert spapi.parse_catalog_item(item)[0]["weight_lb"] == 1.5
+
+
+def test_enrich_default_selection_and_pipeline_survives_step_failure(conn, monkeypatch):
+    from ghostsignal import enrich, cli
+    db.upsert_product(conn, "B000000071", title="Thing")
+    seen = {}
+    monkeypatch.setattr(enrich, "_ask", lambda items: seen.setdefault("items", items) and [])
+    enrich.enrich(conn)                              # no asins given: picks un-enriched products itself
+    assert [i["asin"] for i in seen["items"]] == ["B000000071"]
+    assert cli._step("boom", lambda: 1 / 0) is None   # a broken optional step is logged, not raised

@@ -180,18 +180,18 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
         if unchecked:
             print("gated check:", spapi.check_gated(conn, unchecked), flush=True)
         print("fees updated:", spapi.update_fees(conn, _fees_due(conn)), flush=True)
+    # Optional extras: a failure here must never stop scoring and alerts below.
     if stores.configured():
-        print("store prices:", stores.find_prices(conn, stores.due_for_check(conn, max_prices)), flush=True)
+        _step("store prices", lambda: stores.find_prices(conn, stores.due_for_check(conn, max_prices)))
     if os.environ.get("ANTHROPIC_API_KEY"):
         from . import enrich
-        print("enriched:", enrich.enrich(conn), flush=True)
+        _step("enriched", lambda: enrich.enrich(conn))
     changes = engine.run(conn)
     print(f"{len(changes)} alert(s)", flush=True)
     engine.send_alerts(changes)
     if spapi.configured() and not getattr(run_pipeline, "_in_snowball", False):
         from . import discover
-        sb = discover.snowball(conn)
-        print("snowball:", sb, flush=True)
+        sb = _step("snowball", lambda: discover.snowball(conn)) or {}
         if sb.get("added"):        # check what the snowball found in the same run (sends its own alerts)
             run_pipeline._in_snowball = True
             try:
@@ -199,6 +199,19 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 50):
             finally:
                 run_pipeline._in_snowball = False
     return changes
+
+
+def _step(name, fn):
+    """Run one optional pipeline step; log and carry on if it breaks."""
+    import traceback
+    try:
+        out = fn()
+        print(f"{name}:", out, flush=True)
+        return out
+    except Exception as e:
+        print(f"{name} failed: {e}", flush=True)
+        traceback.print_exc()
+        return None
 
 
 def cmd_run(a):

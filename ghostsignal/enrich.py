@@ -92,6 +92,11 @@ def _ask(items: list[dict]) -> list[dict]:
 
 
 def enrich(conn, asins: list[str] | None = None, force: bool = False) -> int:
+    if asins is None:
+        q = "SELECT p.asin FROM products p LEFT JOIN enrichment e ON e.asin = p.asin WHERE p.title IS NOT NULL"
+        if not force:
+            q += " AND e.asin IS NULL"
+        asins = [r[0] for r in conn.execute(q)]
     done = 0
     for i in range(0, len(asins), BATCH):
         rows = conn.execute(
