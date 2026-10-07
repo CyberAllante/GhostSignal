@@ -149,6 +149,8 @@
   .dh h2 { font-size: 16px; margin: 4px 48px 8px 0; line-height: 1.35; }
   .db { padding: 8px 24px 32px; }
   .sec { margin-top: 20px; }
+  .pimg { display: block; margin-top: 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
+  .pimg img { max-width: 100%; max-height: 240px; object-fit: contain; display: inline-block; }
   details.edit { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
   details.edit summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; }
   details.edit summary::before { content: "▸ "; } details.edit[open] summary::before { content: "▾ "; }
@@ -242,7 +244,7 @@
     <button class="collapse-btn" id="miniBtn" aria-label="Collapse sidebar"><svg class="i"><use href="#i-left"/></svg></button>
   </div>
   <nav id="nav">
-    <a href="#/dashboard" data-p="dashboard"><svg class="i"><use href="#i-dash"/></svg><span class="label">Dashboard</span></a>
+    <a href="#/dashboard" data-p="dashboard"><svg class="i"><use href="#i-dash"/></svg><span class="label">Today</span></a>
     <a href="#/hot" data-p="hot"><svg class="i"><use href="#i-scan"/></svg><span class="label">Hot</span><span class="badge" id="navHot"></span></a>
     <a href="#/holidays" data-p="holidays"><svg class="i"><use href="#i-dash"/></svg><span class="label">Holidays</span></a>
     <a href="#/products" data-p="products"><svg class="i"><use href="#i-box"/></svg><span class="label">Products</span><span class="badge" id="navProducts"></span></a>
@@ -316,7 +318,7 @@ const LABEL = { BUY: "Buy", RESEARCH: "Research", PASS: "Pass" };
 const GATED = { ungated: "Ungated", approval: "Needs approval", limited: "Not eligible yet", blocked: "Can't sell", unknown: "Not checked" };
 let routeSeq = 0;
 const paint = (seq, html) => { if (seq === routeSeq) $("#main").innerHTML = html; return seq === routeSeq; };
-let products = [], view = { verdict: "", q: "", gated: "", cat: "", maxRank: "", minPrice: "", maxPrice: "", sort: "score", dir: -1 }, timer;
+let products = [], view = { verdict: "", q: "", gated: "actionable", cat: "", maxRank: "", minPrice: "", maxPrice: "", sort: "score", dir: -1 }, timer;
 
 function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3500); }
 let productsAt = 0;
@@ -436,48 +438,33 @@ const sub = (p) => {
 
 async function pageDashboard() {
   const seq = routeSeq;
-  const [, stats, changes, demo, out, ung, st] = await Promise.all([loadProducts(), api("/api/stats"), api("/api/changes"), api("/api/demo"), api("/api/outcomes"), api("/api/ungate"), api("/api/refresh/status")]);
-  const live = products.filter((p) => !p.restricted);
-  const count = (g) => live.filter((p) => p.gated === g).length;
-  const withData = live.filter((p) => p.economics.sale_price).length;
-  const rankOf = (p) => p.snapshot?.sales_rank || 1e12;
-  const tiers = hotTiers(live);
-  const sellNow = [...tiers.bangers, ...tiers.check, ...tiers.leads].slice(0, 8);
+  const [, demo, ung, st, hs] = await Promise.all([loadProducts(), api("/api/demo"), api("/api/ungate"), api("/api/refresh/status"), api("/api/holidays").catch(() => [])]);
   ungateData = ung;
-  const approvals = [...ung.categories.map((g) => ({ ...g, kind: "Category" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "Brand" }))]
-    .sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
-  const row = (p) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}
-      <div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${sub(p)}</div></div>
-      ${p.economics.sale_price ? `<b style="white-space:nowrap">${money(p.economics.sale_price)}</b>` : ""}</div>`;
+  const t = hotTiers(products.filter((p) => !p.restricted));
+  const toCheck = [...t.check, ...t.leads].slice(0, 8);
+  const approvals = [...ung.categories.map((g) => ({ ...g, kind: "categories" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "brands" }))]
+    .filter((g) => g.tracking?.status !== "approved").sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
+  const nextH = (hs || []).filter((h) => h.status !== "late").slice(0, 3);
+  const sellable = products.filter((p) => p.gated === "ungated" && !p.restricted).length;
+  const step = (n, title, sub, body) => `<div class="card" style="margin-bottom:20px"><div class="card-h"><div><h2><span class="dim" style="font-weight:400">${n}.</span> ${title}</h2><p>${sub}</p></div></div><div class="card-b">${body}</div></div>`;
+  const prow = (p, right) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}<div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${sub(p)}</div></div>${right}</div>`;
   if (!paint(seq, `
-    ${demo.has_demo ? `<div class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:#fcd34d;background:#fffbeb">
-      <div><b>You're looking at sample data.</b> <span style="color:var(--muted)">None of this is real. Clear it, then import your own.</span></div>
-      <button class="btn" onclick="clearDemo()">Clear sample data</button></div>` : ""}
-    <div class="page-head"><div><h1>Dashboard</h1><p>${st.running ? "Pulling fresh data from Amazon now…" : `Data updated ${ago(st.last_run || stats.last_run)}`}</p></div>
-      <div class="actions"><button class="btn" onclick="$('#dlgOrders').showModal()">${icon("dl")}Import orders</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
-    <div class="stats">
-      ${statCard("green", "check", count("ungated"), "You can sell now", "#/products?g=ungated")}
-      ${statCard("orange", "eye", count("approval"), "Need approval", "#/ungate")}
-      ${statCard("blue", "box", live.length, `Products · ${withData} with market data`, "#/products?v=")}
-      ${statCard("purple", "users", stats.orders, `Order lines · ${stats.buyers} ${stats.buyers === 1 ? "buyer" : "buyers"}`, "#/products?v=")}
-    </div>
-    <div class="grid2">
-      <div class="card"><div class="card-h"><div><h2>Hot right now</h2><p>${tiers.bangers.length} bangers · ${tiers.check.length} to size-check · ${tiers.leads.length} leads · ${tiers.approval.length} one approval away</p></div><a class="btn sm" href="#/hot">Open Hot</a></div>
-        <div class="card-b">${sellNow.length ? sellNow.map(row).join("") : `<div class="empty">Nothing passes the filters yet. Open Hot to see what's one approval away.</div>`}</div></div>
-      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
-        <div class="card"><div class="card-h"><div><h2>Approvals worth getting</h2><p>Unlock the most strong products</p></div><a class="btn sm" href="#/ungate">Open</a></div>
-          <div class="card-b">${approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" data-group="${esc(g.name)}" data-kind="${g.kind === "Category" ? "categories" : "brands"}" style="color:inherit;text-decoration:none">
-            <div style="flex:1;min-width:0"><div class="t">${esc(g.name)}</div><div class="s">${g.kind} · ${g.products} products${g.strong ? ` · <b class="pos">${g.strong} strong</b>` : ""}</div></div></a>`).join("")
-            : `<div class="hint">Run a data refresh so gating is checked.</div>`}</div></div>
-        ${changes.length ? `<div class="card"><div class="card-h"><div><h2>Moved up</h2><p>Got better on the latest scan</p></div></div>
-          <div class="card-b">${changes.map((c) => `<div class="mini-row" data-asin="${c.asin}"><div style="flex:1;min-width:0"><div class="t">${esc(c.title || c.asin)}</div>
-            <div class="s">${LABEL[c.from]} → <b class="${c.to === "BUY" ? "pos" : ""}">${LABEL[c.to]}</b> · ${ago(c.at)}</div></div></div>`).join("")}</div></div>` : ""}
-      </div>
-    </div>
-    ${out.sold_lots ? `<div class="card" style="margin-top:24px"><div class="card-h"><div><h2>How your buys performed</h2><p>What the app predicted when you bought, against what actually happened</p></div></div>
-      <div class="card-b"><div class="table-wrap"><table><thead><tr><th>Verdict when you bought</th><th class="num">Lots sold</th><th class="num">Made money</th><th class="num">Win rate</th><th class="num">Predicted</th><th class="num">Actual</th></tr></thead><tbody>
-        ${Object.entries(out.by_verdict).map(([v, d]) => `<tr><td>${LABEL[v] || "Not scored"}</td><td class="num">${d.lots}</td><td class="num">${d.wins}</td><td class="num">${pct(d.win_rate)}</td><td class="num">${d.predicted_n ? money(d.predicted) : "—"}</td><td class="num ${cls(d.profit)}">${money(d.profit)}</td></tr>`).join("")}</tbody></table></div>
-        <div class="hint" style="margin-top:8px">Total profit ${money(out.total_profit)}.</div></div></div>` : ""}`)) return;
+    ${demo.has_demo ? `<div class="card" style="padding:14px 18px;margin-bottom:20px;border-color:#fcd34d;background:#fffbeb"><b>You're looking at sample data.</b> <button class="btn sm" onclick="clearDemo()">Clear it</button></div>` : ""}
+    <div class="page-head"><div><h1>Today</h1><p>${sellable} products you can sell · ${t.approval.length} one approval away · ${st.running ? "pulling fresh data now…" : `data updated ${ago(st.last_run)}`}</p></div>
+      <div class="actions"><a class="btn" href="#/hot">Open Hot list</a><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
+    ${step(1, "Buy", "A store has it under your max cost and the size is confirmed.",
+      t.bangers.length ? t.bangers.slice(0, 8).map((p) => prow(p, `<b class="pos">${money(p.best_source.price)} at ${esc(p.best_source.retailer)}</b>`)).join("")
+        : `<div class="hint">Nothing confirmed yet. Store prices get checked automatically, about 10 products a day. Check step 2 meanwhile.</div>`)}
+    ${step(2, "Check these", "You can sell them and they pass every filter. Look them up at Walmart, Target, Sam's or Costco: if the price is under \"buy under\", it's a buy.",
+      toCheck.length ? toCheck.map((p) => prow(p, `<div style="text-align:right;white-space:nowrap"><div class="dim" style="font-size:11px">buy under</div><b>${money(p.economics.max_cost)}</b>${p.best_source ? `<div class="dim" style="font-size:11px">${esc(p.best_source.retailer)} ${money(p.best_source.price)}${p.best_source.verified ? "" : " (size?)"}</div>` : ""}</div>`)).join("")
+        : `<div class="hint">No leads right now. Use Find more products on the Hot page.</div>`)}
+    ${step(3, "Apply for approvals", "Each one opens more products. Your account often gets approved instantly, so try them.",
+      approvals.length ? approvals.map((g) => `<a class="mini-row" href="#/ungate" data-group="${esc(g.name)}" data-kind="${g.kind}" style="color:inherit;text-decoration:none">
+          <div style="flex:1;min-width:0"><div class="t">${esc(g.name)}</div><div class="s">${g.kind === "categories" ? "Category" : "Brand"} · ${g.products} products${g.strong ? ` · <b class="pos">${g.strong} strong</b>` : ""}</div></div>
+          ${g.approval_url ? `<span class="btn sm">See products</span>` : ""}</a>`).join("") : `<div class="hint">Nothing to apply for right now.</div>`)}
+    ${nextH.length ? step(4, "Coming up", "Seasonal items sell before the date. Holidays page has the products.",
+      nextH.map((h) => `<a class="mini-row" href="#/holidays" style="color:inherit;text-decoration:none"><div style="flex:1;min-width:0"><div class="t">${esc(h.name)} <span class="dim">· ${h.days_left} days</span></div><div class="s">${esc(h.advice)}</div></div></a>`).join("")) : ""}
+  `)) return;
 }
 
 const COLS = [
@@ -509,7 +496,7 @@ async function pageProducts(params) {
         <div class="search"><svg class="i"><use href="#i-search"/></svg><input id="q" placeholder="Search product, brand, ASIN" value="${esc(view.q)}"></div>
         <div class="tabs" id="vtabs">${["", "BUY", "RESEARCH", "PASS"].map((v) => `<button data-v="${v}" class="${view.verdict === v ? "on" : ""}">${v ? LABEL[v] : "All"}<span class="ct">${v ? products.filter((p) => p.verdict === v).length : products.length}</span></button>`).join("")}</div>
         <span class="results" id="results"></span>
-        <select id="gsel"><option value="">Can sell: any</option>${Object.entries(GATED).map(([k, l]) => `<option value="${k}" ${view.gated === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select id="gsel"><option value="actionable" ${view.gated === "actionable" ? "selected" : ""}>Can sell or 1 approval away</option><option value="" ${view.gated === "" ? "selected" : ""}>Everything (incl. can't sell)</option>${Object.entries(GATED).map(([k, l]) => `<option value="${k}" ${view.gated === k ? "selected" : ""}>${l}</option>`).join("")}</select>
       </div>
       <div class="filters" style="padding-top:0">
         <select id="csel"><option value="">Category: any</option>${[...new Set(products.map((p) => p.category).filter(Boolean))].sort().map((c) => `<option ${view.cat === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
@@ -525,7 +512,7 @@ async function pageProducts(params) {
   $("#gsel").onchange = (e) => { view.gated = e.target.value; renderTable(); };
   $("#csel").onchange = (e) => { view.cat = e.target.value; renderTable(); };
   for (const [id, k] of [["fRank", "maxRank"], ["fMin", "minPrice"], ["fMax", "maxPrice"]]) $("#" + id).oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => { view[k] = e.target.value; renderTable(); }, 200); };
-  $("#fClear").onclick = () => { Object.assign(view, { verdict: "", q: "", gated: "", cat: "", maxRank: "", minPrice: "", maxPrice: "" }); pageProducts(new URLSearchParams()); };
+  $("#fClear").onclick = () => { Object.assign(view, { verdict: "", q: "", gated: "actionable", cat: "", maxRank: "", minPrice: "", maxPrice: "" }); pageProducts(new URLSearchParams()); };
   $("#thead").onclick = (e) => {
     const th = e.target.closest("th"); if (!th) return;
     view.dir = view.sort === th.dataset.k ? -view.dir : (["title", "store", "gated"].includes(th.dataset.k) ? 1 : -1);
@@ -538,7 +525,8 @@ function renderTable() {
   $("#thead").innerHTML = COLS.map(([k, l]) => `<th data-k="${k}" class="sortable ${NUMCOLS.has(k) ? "num" : ""} ${view.sort === k ? "sorted" : ""}">${l}${view.sort === k ? (view.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("");
   const q = view.q.toLowerCase(), get = COLS.find((c) => c[0] === view.sort)[2];
   const list = products
-    .filter((p) => (!view.verdict || p.verdict === view.verdict) && (!view.gated || p.gated === view.gated)
+    .filter((p) => (!view.verdict || p.verdict === view.verdict)
+      && (!view.gated || (view.gated === "actionable" ? (p.gated === "ungated" || p.gated === "approval") && !p.restricted : p.gated === view.gated))
       && (!view.cat || p.category === view.cat)
       && (!view.maxRank || (p.snapshot?.sales_rank && p.snapshot.sales_rank <= Number(view.maxRank)))
       && (!view.minPrice || (p.economics.sale_price && p.economics.sale_price >= Number(view.minPrice)))
@@ -791,11 +779,13 @@ function drawer(p) {
       <h2>${esc(p.title || p.asin)}</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill ${p.verdict}">${LABEL[p.verdict]} · ${p.score}/100</span>${gatedPill(p)}</div></div>
     <div class="db">
+      ${p.image_url ? `<a href="${esc(p.links.amazon || "#")}" target="_blank" rel="noopener" class="pimg"><img src="${esc(p.image_url)}" alt="${esc(p.title || "")}" loading="lazy"></a>` : ""}
       <div class="sec"><div class="kv">
         ${kv("Sell price", money(e.sale_price))}${kv("Max cost", money(e.max_cost))}${kv("Profit", money(e.profit), cls(e.profit))}
         ${kv("ROI", pct(e.roi), cls(e.roi))}${kv("Rank", num(s.sales_rank))}${kv("Sellers", s.offer_count ?? "—")}
       </div>
-      ${e.fbm ? `<div class="hint" style="margin-top:6px"><b>Ship it yourself (FBM):</b> ~${money(e.fbm.label)} label, you keep ${money(e.fbm.net)} before cost${e.fbm.profit != null ? ` · profit <b class="${cls(e.fbm.profit)}">${money(e.fbm.profit)}</b>` : ` · buy under <b>${money(e.fbm.max_cost)}</b>`}</div>` : ""}
+      ${e.fbm ? `<div class="hint" style="margin-top:6px"><b>Ship it yourself (FBM):</b> ${e.fbm.net <= 0 ? `not worth it. A ~${money(e.fbm.label)} label eats the whole sale.`
+        : `~${money(e.fbm.label)} label, you keep ${money(e.fbm.net)} before cost${e.fbm.profit != null ? ` · profit <b class="${cls(e.fbm.profit)}">${money(e.fbm.profit)}</b>` : ` · buy under <b>${money(e.fbm.max_cost)}</b>`}`}</div>` : ""}
       <div class="hint" style="margin-top:6px">${e.cost ? `Your cost ${money(e.cost)}` : "No store price yet"}${amz ? ` · Amazon fees ${money(amz)}` : ""}${s.monthly_sold ? ` · ${num(s.monthly_sold)}/mo` : ""}${others.length ? ` · ${others.join(", ")}` : ""}</div></div>
 
       <div class="sec"><h3>Why this score</h3><ul class="why">
