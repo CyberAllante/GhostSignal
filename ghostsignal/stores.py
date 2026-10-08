@@ -168,11 +168,12 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) 
         if match < (0.3 if r.get("via") == "lens" else min_match):
             continue
         size_ok = same_size(amazon_title, r.get("title", ""))
-        if size_ok is False:          # 18 oz bag vs the 32 oz listing: not the same product
+        if size_ok is not True:       # only show a price when the pack size is confirmed the same
             continue
         if key not in best or price < best[key]["price"]:
             best[key] = {"retailer": key, "price": float(price), "title": r.get("title", ""),
-                         "url": r.get("link") or r.get("product_link") or "", "match": round(match, 2),
+                         "url": r.get("product_link") or r.get("link") or "", "match": round(match, 2),
+                         "store_title": r.get("title", ""),
                          "via": r.get("via", "shopping"), "size_ok": size_ok}
     return sorted(best.values(), key=lambda o: o["price"])
 

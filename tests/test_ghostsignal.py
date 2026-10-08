@@ -168,7 +168,7 @@ def test_store_matching():
         {"title": "Peets Major Dickasons Blend Ground Coffee 32oz", "source": "Costco", "extracted_price": 24.99},
         {"title": "Totally different thing", "source": "Target", "extracted_price": 3.0},
     ], "Peet's Coffee Major Dickason's Blend Dark Roast Ground Coffee, 32 oz")
-    assert [o["retailer"] for o in offers] == ["samsclub", "costco"]
+    assert [o["retailer"] for o in offers] == ["costco"]   # no size stated on the Sam's listing: not shown
 
 
 def test_clear_demo_only_removes_samples(conn):
@@ -583,3 +583,14 @@ def test_only_reputable_retailers_count():
     res = [{"source": "TikTok Shop", "extracted_price": 5.0, "title": t}, {"source": "Walmart - Seller", "extracted_price": 6.0, "title": t},
            {"source": "Costco Wholesale", "extracted_price": 18.99, "title": t}, {"source": "T.J.Maxx", "extracted_price": 19.99, "title": t}]
     assert [o["retailer"] for o in pick_offers(res, t)] == ["costco", "tjmaxx"]
+
+
+def test_store_offers_need_confirmed_size_and_real_product_link():
+    from ghostsignal.stores import pick_offers
+    t = "Peets Coffee, Major Dickason's Blend, Whole Bean 32oz Bag"
+    res = [{"source": "Walmart", "extracted_price": 13.99, "title": "Peet's Dark Roast 18 oz", "product_link": "https://walmart.com/ip/1"},
+           {"source": "Target", "extracted_price": 22.99, "title": "Peet's Whole Bean Coffee", "product_link": "https://target.com/p/9"},
+           {"source": "Costco", "extracted_price": 26.99, "title": "Peet's Coffee Whole Bean 32 oz", "product_link": "https://costco.com/p/3"}]
+    offers = pick_offers(res, t)
+    assert [o["retailer"] for o in offers] == ["costco"]          # wrong size dropped, unconfirmed size dropped
+    assert offers[0]["url"] == "https://costco.com/p/3" and offers[0]["store_title"].startswith("Peet's")
