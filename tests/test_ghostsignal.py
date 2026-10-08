@@ -635,3 +635,13 @@ def test_storefront_parse_and_pull(conn, monkeypatch):
     assert conn.execute("SELECT origin FROM products WHERE asin = 'B000000091'").fetchone()[0] == "seller:ANEWSELLER0001"
     assert conn.execute("SELECT asin_count FROM tracked_sellers WHERE seller_id = 'ANEWSELLER0001'").fetchone()[0] == 2
     assert discover.pull_seller(conn, "ANEWSELLER0001", pages=1)["added"] == 0          # second pull adds nothing new
+
+
+def test_migration_columns_survive_reopen(tmp_path):
+    path = str(tmp_path / "m.db")
+    c = db.connect(path); c.close()                       # first open: schema + migration, then closed without any writes
+    db._migrated.discard(path)
+    import sqlite3
+    raw = sqlite3.connect(path)
+    cols = {r[1] for r in raw.execute("PRAGMA table_info(products)")}
+    assert {"weight_lb", "store_note"} <= cols            # the added columns must be committed, not rolled back

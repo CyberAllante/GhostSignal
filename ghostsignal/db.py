@@ -193,6 +193,7 @@ def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     if str(path) == ":memory:" or str(path) not in _migrated:
         conn.executescript(SCHEMA)
         _migrate(conn)
+        conn.commit()          # the migration's UPDATE opens a transaction; without this the ALTERs roll back on close
         if str(path) != ":memory:":
             _migrated.add(str(path))
     return conn
