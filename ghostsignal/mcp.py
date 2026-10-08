@@ -447,6 +447,28 @@ def t_holidays(conn, a):
                      for r in rows)
 
 
+def t_found_sellers(conn, a):
+    rows = db.found_sellers(conn, limit=int(a.get("limit") or 15))
+    if not rows:
+        return "No sellers recorded yet. Run `run_now`; sellers are captured whenever market data is pulled."
+    lines = [f"- {r['seller_id']}: {r['feedback']} feedback, on {r['listings']} of your listings ({r['sellable']} you can sell), "
+             f"{r['fba_listings']} via FBA, {r['pulled']} products pulled" + (f" | e.g. {'; '.join(x[:40] for x in r['examples'])}" if r["examples"] else "")
+             for r in rows]
+    return ("Third-party sellers seen on your listings, newest accounts first (what a zero-feedback seller lists, you can "
+            "likely sell too):\n" + "\n".join(lines) + "\nUse pull_storefront to add a seller's products.")
+
+
+def t_pull_storefront(conn, a):
+    from .server import is_running, storefront_in_background
+    sid = importers.parse_seller_id(a["seller"]) or a["seller"].strip().upper()
+    if is_running():
+        return "A data run is already going; try again when it finishes."
+    pages = int(a.get("pages") or 3)
+    storefront_in_background(_path(conn), sid, pages)
+    return (f"Pulling {sid}'s storefront ({pages} pages, about {pages * 16} products, {pages} store searches). "
+            "They get gating, market data and store prices in the same run; then check `picks` or the Hot page.")
+
+
 def _tool(fn, desc, props=None, required=()):
     return {"fn": fn, "description": desc,
             "inputSchema": {"type": "object", "properties": props or {}, "required": list(required)}}
@@ -501,6 +523,9 @@ TOOLS = {
                        "keywords": {"type": "array", "items": S}, "pages": I}),
     "holidays": _tool(t_holidays, "Upcoming holidays with buy/ship-by dates; pass pull=<holiday name> to discover products for it.",
                       {"pull": S}),
+    "found_sellers": _tool(t_found_sellers, "Third-party sellers spotted on your listings, lowest feedback first (new accounts like yours).", {"limit": I}),
+    "pull_storefront": _tool(t_pull_storefront, "Add every product a seller lists (storefront via SerpAPI, 1 search per 16 products).",
+                             {"seller": S, "pages": I}, ["seller"]),
     "run_now": _tool(t_run_now, "Start a refresh + rescore now (data, store prices, gating, alerts)."),
 }
 

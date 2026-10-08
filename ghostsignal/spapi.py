@@ -159,7 +159,7 @@ def update_fees(conn, asins: list[str]) -> int:
 
 # Amazon's own retail seller IDs as they appear in offer data. Verified 10/7 against Echo Dot, Charmin, Tide,
 # Pringles, Bounty listings (all A2R2RITDJNW1Q6); ATVPDKIKX0DER is the marketplace ID, kept for older data.
-AMAZON_SELLER_IDS = {"A2R2RITDJNW1Q6", "ATVPDKIKX0DER"}
+AMAZON_SELLER_IDS = db.AMAZON_SELLER_IDS
 _CARRY = ("avg_price_90", "monthly_sold", "referral_pct", "fba_fee", "ebay_sold_price")
 
 
@@ -256,6 +256,8 @@ def refresh_market(conn, asins: list[str]) -> dict:
                 continue
             product, rank, extra = parse_catalog_item(items.get(asin, {}))
             snap = parse_offers(offers.get(asin, {})) if asin in offers else {}
+            if asin in offers:
+                db.record_sellers(conn, asin, offers[asin])
             prev = db.latest_snapshot(conn, asin)
             carry = {k: prev[k] for k in _CARRY if prev and prev[k] is not None}
             if snap.get("buy_box") is None and prev:      # no Buy Box now: keep the last known price

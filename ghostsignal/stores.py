@@ -303,3 +303,35 @@ def due_for_check(conn, limit: int = 8, days: float = 14) -> list[str]:
             continue
         picks.append(((1 if v["gated"] == "ungated" else 0), -s["sales_rank"], asin))
     return [a for *_, a in sorted(picks, reverse=True)[:limit]]
+
+
+# ---------------------------------------------------------------- Amazon storefronts (no Keepa needed)
+
+def parse_storefront(data: dict) -> list[dict]:
+    out = []
+    for r in data.get("organic_results") or []:
+        if not r.get("asin"):
+            continue
+        out.append({"asin": r["asin"], "title": r.get("title", ""), "price": r.get("extracted_price"),
+                    "image_url": r.get("thumbnail", ""), "rating": r.get("rating"), "reviews": r.get("reviews")})
+    return out
+
+
+def amazon_storefront(seller_id: str, pages: int = 3) -> tuple[list[dict], int]:
+    """Every product a seller lists, 16 per page, 1 SerpAPI search per page. -> (products, searches used).
+    Uses Amazon's own seller filter (rh=p_6:<seller>) through SerpAPI's Amazon engine."""
+    items, used = [], 0
+    for page in range(1, pages + 1):
+        params = {"engine": "amazon", "amazon_domain": "amazon.com", "k": "*", "rh": f"p_6:{seller_id}",
+                  "page": page, "api_key": os.environ["SERPAPI_KEY"]}
+        with urllib.request.urlopen(f"{API}?{urllib.parse.urlencode(params)}", timeout=90) as r:
+            data = json.loads(r.read())
+        used += 1
+        if data.get("error"):
+            raise RuntimeError(data["error"])
+        got = parse_storefront(data)
+        items += got
+        if not got or not (data.get("serpapi_pagination") or {}).get("next"):
+            break
+    seen = set()
+    return [i for i in items if not (i["asin"] in seen or seen.add(i["asin"]))], used

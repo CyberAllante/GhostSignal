@@ -745,13 +745,22 @@ async function pageUngate() {
 
 async function pageSellers() {
   const seq = routeSeq;
-  const [list, groups] = await Promise.all([api("/api/sellers"), api("/api/seller-groups")]);
+  const [list, groups, found] = await Promise.all([api("/api/sellers"), api("/api/seller-groups"), api("/api/sellers/found").catch(() => [])]);
+  const foundCard = `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>New sellers spotted on your listings</h2><p>Third-party sellers Amazon shows on products you track, lowest feedback first. A zero-feedback seller is a new account like yours: what they list, you can likely sell. Pull a storefront to add their products (1 store search per 16 products).</p></div></div>
+    ${found.length ? `<div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Feedback</th><th class="num">On your listings</th><th class="num">You can sell</th><th class="num">FBA</th><th>Examples</th><th class="num">Pulled</th><th></th></tr></thead>
+    <tbody>${found.map((r) => `<tr><td><a href="https://www.amazon.com/s?me=${esc(r.seller_id)}" target="_blank" rel="noopener"><b>${esc(r.seller_id)}</b> ↗</a></td>
+      <td class="num"><b class="${(r.feedback || 0) === 0 ? "pos" : ""}">${r.feedback ?? "?"}</b>${r.positive != null ? ` <span class="dim">(${Math.round(r.positive)}%)</span>` : ""}</td>
+      <td class="num">${r.listings}</td><td class="num pos">${r.sellable}</td><td class="num">${r.fba_listings}</td>
+      <td class="dim" style="max-width:300px;font-size:12px">${(r.examples || []).map((x) => esc(x.slice(0, 45))).join(" · ")}</td>
+      <td class="num">${r.pulled || "—"}</td>
+      <td class="num"><button class="btn sm" data-pull-seller="${esc(r.seller_id)}">${icon("search")}Pull 3 pages</button></td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="card-b"><div class="hint">No sellers recorded yet. Sellers are captured every time market data is pulled; refresh data to start.</div></div>`}</div>`;
   $("#navSellers").textContent = list.length || "";
   const active = list.filter((s) => s.status === "active").length;
   const groupCard = groups.length ? `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>From your imports</h2><p>Sellers whose products came in with a seller column. Diamonds = you can sell it, 8 or fewer sellers, one FBA seller, not sold by Amazon.</p></div></div>
     <div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Products</th><th class="num">You can sell</th><th class="num">Diamonds</th><th class="num">Amazon sells</th></tr></thead>
     <tbody>${groups.map((g) => `<tr><td><b>${esc(g.seller)}</b></td><td class="num">${g.products}</td><td class="num">${g.sellable}</td><td class="num pos"><b>${g.diamonds}</b></td><td class="num">${g.amazon_sold}</td></tr>`).join("")}</tbody></table></div></div>` : "";
-  if (!paint(seq, `${groupCard}
+  if (!paint(seq, `${foundCard}${groupCard}
     <div class="page-head"><div><h1>Tracked sellers</h1><p>Storefronts you're watching. Their products land in Products automatically.</p></div>
       <div class="actions"><button class="btn" onclick="refreshSellers(this)">${icon("refresh")}Refresh</button><button class="btn primary" onclick="$('#dlgSeller').showModal()">${icon("plus")}Add seller</button></div></div>
     <div class="stats three">
@@ -1010,7 +1019,14 @@ async function route() {
   try { await PAGES[p](params); } catch (e) { $("#main").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
 }
 window.onhashchange = route;
-$("#main").addEventListener("click", (e) => {
+$("#main").addEventListener("click", async (e) => {
+  const ps = e.target.closest("[data-pull-seller]");
+  if (ps) {
+    e.preventDefault(); ps.disabled = true; ps.textContent = "Pulling…";
+    try { const r = await api(`/api/sellers/${ps.dataset.pullSeller}/pull`, { pages: 3 }); toast(r.started ? "Pulling their storefront (about 48 products, 3 searches). Products show up as they're checked, 15 to 30 min." : "A data run is already going. Try again when it finishes."); }
+    catch (err) { toast(err.message); ps.disabled = false; ps.textContent = "Pull 3 pages"; }
+    return;
+  }
   const g = e.target.closest("a[data-group]");
   if (g) { e.preventDefault(); openGroup(g.dataset.kind, g.dataset.group); return; }
   if (e.target.closest("a.chip-store, [data-check]")) return;   // store link / price check, not the row

@@ -128,3 +128,19 @@ def snowball(conn, limit: int = 8) -> dict:
     db.set_setting(conn, SNOW_KEY, json.dumps(done))
     conn.commit()
     return {"brands": brands, **r}
+
+
+def pull_seller(conn, seller_id: str, pages: int = 3) -> dict:
+    """Add everything a seller lists (their storefront) so the pipeline can check what you can sell and source."""
+    from . import stores
+    items, used = stores.amazon_storefront(seller_id, pages)
+    added = 0
+    for it in items:
+        new = conn.execute("SELECT 1 FROM products WHERE asin = ?", (it["asin"],)).fetchone() is None
+        db.upsert_product(conn, it["asin"], title=it["title"], image_url=it["image_url"], origin=f"seller:{seller_id}")
+        added += new
+    db.add_seller(conn, seller_id)
+    conn.execute("UPDATE tracked_sellers SET last_pull = ?, asin_count = ?, new_count = ? WHERE seller_id = ?",
+                 (db.now(), len(items), added, seller_id))
+    conn.commit()
+    return {"seller": seller_id, "products": len(items), "added": added, "searches_used": used}

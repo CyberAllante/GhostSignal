@@ -157,6 +157,21 @@ CREATE TABLE IF NOT EXISTS enrichment (
     updated_at  TEXT NOT NULL,
     data        TEXT NOT NULL       -- JSON
 );
+
+-- Every third-party seller spotted on a listing's offers, with their feedback count. Zero/low feedback = a new
+-- account like yours: what they can sell, you can likely sell. Free: comes with the Seller API offers call.
+CREATE TABLE IF NOT EXISTS sellers_seen (
+    seller_id      TEXT NOT NULL,
+    asin           TEXT NOT NULL,
+    feedback_count INTEGER,
+    positive_pct   REAL,
+    fba            INTEGER,
+    price          REAL,
+    buybox         INTEGER,
+    seen_at        TEXT NOT NULL,
+    PRIMARY KEY (seller_id, asin)
+);
+CREATE INDEX IF NOT EXISTS idx_sellers_seen_fb ON sellers_seen(feedback_count);
 """
 
 
@@ -451,4 +466,48 @@ def spend_by_buyer(conn: sqlite3.Connection) -> dict:
     for r in conn.execute("""SELECT buyer, COUNT(*) AS orders, ROUND(SUM(t), 2) AS spend, SUM(t IS NULL) AS unknown FROM (
                                SELECT buyer, order_id, MAX(order_total) AS t FROM orders GROUP BY buyer, order_id) GROUP BY buyer"""):
         out[r["buyer"]] = {"orders": r["orders"], "spend": r["spend"] or 0.0, "orders_without_total": r["unknown"]}
+    return out
+
+
+AMAZON_SELLER_IDS = {"A2R2RITDJNW1Q6", "ATVPDKIKX0DER"}
+
+
+def record_sellers(conn: sqlite3.Connection, asin: str, offers_payload: dict) -> int:
+    """Remember who is selling on this listing and how much feedback they have."""
+    n = 0
+    for o in offers_payload.get("Offers") or []:
+        sid = o.get("SellerId")
+        if not sid:
+            continue
+        fb = o.get("SellerFeedbackRating") or {}
+        price = (o.get("ListingPrice") or {}).get("Amount")
+        conn.execute("""INSERT OR REPLACE INTO sellers_seen (seller_id, asin, feedback_count, positive_pct, fba, price, buybox, seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (sid, asin, fb.get("FeedbackCount"), fb.get("SellerPositiveFeedbackRating"),
+                      1 if o.get("IsFulfilledByAmazon") else 0, float(price) if price is not None else None,
+                      1 if o.get("IsBuyBoxWinner") else 0, now()))
+        n += 1
+    return n
+
+
+def found_sellers(conn: sqlite3.Connection, limit: int = 40, max_feedback: int = 200) -> list[dict]:
+    """Third-party sellers seen on your listings, newest accounts first (lowest feedback), with how many of the
+    listings they sit on you can sell yourself."""
+    marks = ",".join("?" * len(AMAZON_SELLER_IDS))
+    rows = conn.execute(f"""
+        SELECT s.seller_id, MIN(s.feedback_count) AS feedback, MAX(s.positive_pct) AS positive,
+               COUNT(DISTINCT s.asin) AS listings, SUM(s.fba) AS fba_listings,
+               SUM(CASE WHEN e.status = 'ungated' THEN 1 ELSE 0 END) AS sellable, MAX(s.seen_at) AS last_seen,
+               (SELECT COUNT(*) FROM products p WHERE p.origin LIKE '%seller:' || s.seller_id || '%') AS pulled
+        FROM sellers_seen s LEFT JOIN eligibility e ON e.asin = s.asin
+        WHERE s.seller_id NOT IN ({marks}) AND COALESCE(s.feedback_count, 0) <= ?
+        GROUP BY s.seller_id
+        ORDER BY feedback ASC, sellable DESC, listings DESC LIMIT ?""", [*sorted(AMAZON_SELLER_IDS), max_feedback, limit]).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["examples"] = [x[0] for x in conn.execute(
+            """SELECT p.title FROM sellers_seen s JOIN products p ON p.asin = s.asin
+               WHERE s.seller_id = ? AND p.title IS NOT NULL LIMIT 2""", (d["seller_id"],))]
+        out.append(d)
     return out

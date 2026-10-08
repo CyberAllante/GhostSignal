@@ -603,3 +603,35 @@ def test_same_size_different_product_rejected():
     assert same_product(t, "Walmart Great Value Ground Pepper 32 oz") is False
     res = [{"source": "Walmart", "extracted_price": 62.0, "title": "Great Value Pepper Shaker Set 32 oz"}]
     assert pick_offers(res, t) == []
+
+
+def test_sellers_recorded_and_ranked_newest_first(conn):
+    db.upsert_product(conn, "B000000081", title="Hershey variety")
+    db.upsert_product(conn, "B000000082", title="Bounty towels")
+    db.set_eligibility(conn, "B000000081", "ungated", "spapi")
+    payload = {"Offers": [
+        {"SellerId": "ANEWSELLER0001", "SellerFeedbackRating": {"FeedbackCount": 0, "SellerPositiveFeedbackRating": 0.0}, "ListingPrice": {"Amount": 33.18}},
+        {"SellerId": "AOLDSELLER0002", "SellerFeedbackRating": {"FeedbackCount": 150, "SellerPositiveFeedbackRating": 53.0}, "IsFulfilledByAmazon": True, "ListingPrice": {"Amount": 33.19}},
+        {"SellerId": "A2R2RITDJNW1Q6", "SellerFeedbackRating": {"FeedbackCount": 367}, "ListingPrice": {"Amount": 29.99}},
+    ]}
+    assert db.record_sellers(conn, "B000000081", payload) == 3
+    db.record_sellers(conn, "B000000082", {"Offers": [{"SellerId": "ANEWSELLER0001", "SellerFeedbackRating": {"FeedbackCount": 0}}]})
+    found = db.found_sellers(conn)
+    assert [f["seller_id"] for f in found] == ["ANEWSELLER0001", "AOLDSELLER0002"]     # Amazon itself excluded
+    assert found[0]["feedback"] == 0 and found[0]["listings"] == 2 and found[0]["sellable"] == 1
+    assert found[0]["examples"] and found[1]["fba_listings"] == 1
+
+
+def test_storefront_parse_and_pull(conn, monkeypatch):
+    from ghostsignal import stores, discover
+    page = {"organic_results": [{"asin": "B000000091", "title": "Dubble Bubble Tub", "extracted_price": 18.99, "thumbnail": "https://img/1.jpg"},
+                                {"asin": "B000000092", "title": "Filtrete Filter 4 pack", "extracted_price": 47.99, "thumbnail": ""},
+                                {"title": "no asin, skipped"}],
+            "serpapi_pagination": {"next": "x"}}
+    assert [i["asin"] for i in stores.parse_storefront(page)] == ["B000000091", "B000000092"]
+    monkeypatch.setattr(stores, "amazon_storefront", lambda sid, pages=3: (stores.parse_storefront(page), 1))
+    r = discover.pull_seller(conn, "ANEWSELLER0001", pages=1)
+    assert r == {"seller": "ANEWSELLER0001", "products": 2, "added": 2, "searches_used": 1}
+    assert conn.execute("SELECT origin FROM products WHERE asin = 'B000000091'").fetchone()[0] == "seller:ANEWSELLER0001"
+    assert conn.execute("SELECT asin_count FROM tracked_sellers WHERE seller_id = 'ANEWSELLER0001'").fetchone()[0] == 2
+    assert discover.pull_seller(conn, "ANEWSELLER0001", pages=1)["added"] == 0          # second pull adds nothing new

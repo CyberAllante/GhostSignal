@@ -23,7 +23,7 @@ WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
 ORDER = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 INV_PATH = re.compile(r"^/api/inventory/(\d+)$")
-SELLER_PATH = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/(status|remove)$")
+SELLER_PATH = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/(status|remove|pull)$")
 
 
 def sellers(conn):
@@ -55,6 +55,26 @@ def refresh_in_background(db_path, stale_days=None):
             _invalidate_lists()
         except Exception as e:
             print("background refresh failed:", e, flush=True)
+        finally:
+            _run_lock.release()
+    threading.Thread(target=work, daemon=True).start()
+
+
+def storefront_in_background(db_path, seller_id: str, pages: int = 3):
+    """Pull a seller's storefront, then run the normal pipeline (gating, market data, store prices) on it."""
+    def work():
+        if not _run_lock.acquire(blocking=False):
+            return
+        try:
+            from . import discover
+            from .cli import run_pipeline
+            c = db.connect(db_path)
+            print("storefront:", discover.pull_seller(c, seller_id, pages), flush=True)
+            run_pipeline(c)
+            c.close()
+            _invalidate_lists()
+        except Exception as e:
+            print("storefront pull failed:", e, flush=True)
         finally:
             _run_lock.release()
     threading.Thread(target=work, daemon=True).start()
@@ -376,6 +396,8 @@ def make_handler(db_path):
                 if url.path == "/api/setup":
                     from .setup_status import checklist
                     return self._send(200, {"items": checklist(conn), "location": db.get_setting(conn, "location")})
+                if url.path == "/api/sellers/found":
+                    return self._send(200, db.found_sellers(conn))
                 if url.path == "/api/sellers":
                     return self._send(200, sellers(conn))
                 if url.path == "/api/inventory":
@@ -633,6 +655,14 @@ def make_handler(db_path):
                     engine.run(conn)
                     return self._send(200, {"message": f"Pulled {n} products"})
                 sm = SELLER_PATH.match(url.path)
+                if sm and sm.group(2) == "pull":
+                    from . import stores
+                    if not stores.configured():
+                        return self._send(400, {"error": "Storefront pulls need SERPAPI_KEY"})
+                    if is_running():
+                        return self._send(200, {"started": False, "running": True})
+                    storefront_in_background(db_path, sm.group(1), int(body.get("pages") or 3))
+                    return self._send(200, {"started": True, "running": True})
                 if sm and sm.group(2) == "status":
                     conn.execute("UPDATE tracked_sellers SET status = ? WHERE seller_id = ?", (body["status"], sm.group(1)))
                     conn.commit()
