@@ -147,6 +147,7 @@ def import_products(conn, path: str | Path, source: str = "csv") -> dict:
             continue
         asin = str(raw_asin).strip().upper()
         n += 1
+        seller = pick(r, "Seller", "Seller Name", "Seller ID", "Seller Id", "Merchant", "Storefront", "Sold by")
         db.upsert_product(
             conn, asin,
             title=pick(r, "title", "Title", "Product Name", "name"),
@@ -154,7 +155,7 @@ def import_products(conn, path: str | Path, source: str = "csv") -> dict:
             category=pick(r, "category", "Category", "Root Category", "Categories: Root"),
             upc=pick(r, "upc", "UPC", "Product Codes: UPC", "EAN"),
             image_url=pick(r, "image", "Image", "image_url", "Image URL"),
-            origin=source,
+            origin=f"{source},seller:{str(seller).strip()}" if seller else source,
         )
         snap = dict(
             buy_box=money(pick(r, "Buy Box", "buy_box", "Buy Box: Current", "Buy Box 🚚: Current", "Price", "Sale price")),

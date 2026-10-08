@@ -276,6 +276,24 @@ def make_handler(db_path):
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
                 if url.path == "/api/invites":
                     return self._send(200, invites.listing(conn))
+                if url.path == "/api/seller-groups":
+                    from . import engine as _e
+                    groups: dict[str, dict] = {}
+                    for (asin, origin) in conn.execute("SELECT asin, origin FROM products WHERE status != 'dead' AND origin LIKE '%seller:%'"):
+                        name = next((o[len("seller:"):] for o in origin.split(",") if o.startswith("seller:")), None)
+                        if not name:
+                            continue
+                        v = _e.list_view(conn, asin)
+                        g = groups.setdefault(name, {"seller": name, "products": 0, "sellable": 0, "diamonds": 0, "amazon_sold": 0})
+                        g["products"] += 1
+                        if v["snapshot"] and v["snapshot"].get("amazon_price"):
+                            g["amazon_sold"] += 1
+                        if v["gated"] == "ungated" and not v["restricted"]:
+                            g["sellable"] += 1
+                            s = v["snapshot"] or {}
+                            if (s.get("offer_count") or 0) <= 8 and (s.get("fba_offers") or 0) >= 1 and not s.get("amazon_price"):
+                                g["diamonds"] += 1
+                    return self._send(200, sorted(groups.values(), key=lambda g: (-g["diamonds"], -g["sellable"])))
                 if url.path == "/api/prices/status":
                     return self._send(200, price_jobs)
                 if url.path == "/api/stores/budget":

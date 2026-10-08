@@ -742,10 +742,13 @@ async function pageUngate() {
 
 async function pageSellers() {
   const seq = routeSeq;
-  const list = await api("/api/sellers");
+  const [list, groups] = await Promise.all([api("/api/sellers"), api("/api/seller-groups")]);
   $("#navSellers").textContent = list.length || "";
   const active = list.filter((s) => s.status === "active").length;
-  if (!paint(seq, `
+  const groupCard = groups.length ? `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>From your imports</h2><p>Sellers whose products came in with a seller column. Diamonds = you can sell it, 8 or fewer sellers, one FBA seller, not sold by Amazon.</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Products</th><th class="num">You can sell</th><th class="num">Diamonds</th><th class="num">Amazon sells</th></tr></thead>
+    <tbody>${groups.map((g) => `<tr><td><b>${esc(g.seller)}</b></td><td class="num">${g.products}</td><td class="num">${g.sellable}</td><td class="num pos"><b>${g.diamonds}</b></td><td class="num">${g.amazon_sold}</td></tr>`).join("")}</tbody></table></div></div>` : "";
+  if (!paint(seq, `${groupCard}
     <div class="page-head"><div><h1>Tracked sellers</h1><p>Storefronts you're watching. Their products land in Products automatically.</p></div>
       <div class="actions"><button class="btn" onclick="refreshSellers(this)">${icon("refresh")}Refresh</button><button class="btn primary" onclick="$('#dlgSeller').showModal()">${icon("plus")}Add seller</button></div></div>
     <div class="stats three">
