@@ -366,11 +366,13 @@ function isLead(p) {
   const s = p.snapshot || {}, e = p.economics;
   return !p.restricted && (p.gated === "ungated" || p.gated === "approval")
     && p.enrichment?.sold_in_stores !== false && !s.amazon_price
-    && (s.offer_count || 0) >= 2 && (e.sale_price || 0) >= 18 && s.sales_rank && s.sales_rank <= 80000;
+    && (s.offer_count || 0) >= 2 && (e.sale_price || 0) >= 18 && s.sales_rank && s.sales_rank <= 80000
+    && (e.profit == null || e.profit > 0);      // a lead must make money at the best channel (or not be priced yet)
 }
 function hotTiers(list) {
   const leads = list.filter(isLead).sort((a, b) => (a.snapshot.sales_rank) - (b.snapshot.sales_rank));
-  const hasGap = (p) => p.best_source && p.economics.max_cost != null && p.best_source.price <= p.economics.max_cost;
+  const hasGap = (p) => p.best_source && p.economics.max_cost != null && p.best_source.price <= p.economics.max_cost
+    && (p.best_source.price < p.economics.sale_price * 0.95);   // store price must actually leave room to profit
   return {
     bangers: leads.filter((p) => p.gated === "ungated" && hasGap(p) && p.best_source.verified),
     check: leads.filter((p) => p.gated === "ungated" && hasGap(p) && !p.best_source.verified),

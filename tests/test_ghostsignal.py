@@ -590,7 +590,16 @@ def test_store_offers_need_confirmed_size_and_real_product_link():
     t = "Peets Coffee, Major Dickason's Blend, Whole Bean 32oz Bag"
     res = [{"source": "Walmart", "extracted_price": 13.99, "title": "Peet's Dark Roast 18 oz", "product_link": "https://walmart.com/ip/1"},
            {"source": "Target", "extracted_price": 22.99, "title": "Peet's Whole Bean Coffee", "product_link": "https://target.com/p/9"},
-           {"source": "Costco", "extracted_price": 26.99, "title": "Peet's Coffee Whole Bean 32 oz", "product_link": "https://costco.com/p/3"}]
+           {"source": "Costco", "extracted_price": 26.99, "title": "Peet's Coffee Major Dickason's Blend Whole Bean 32 oz", "product_link": "https://costco.com/p/3"}]
     offers = pick_offers(res, t)
     assert [o["retailer"] for o in offers] == ["costco"]          # wrong size dropped, unconfirmed size dropped
     assert offers[0]["url"] == "https://costco.com/p/3" and offers[0]["store_title"].startswith("Peet's")
+
+
+def test_same_size_different_product_rejected():
+    from ghostsignal.stores import pick_offers, same_product
+    t = "Peets Coffee, Major Dickason's Blend, Whole Bean 32oz Bag"
+    assert same_product(t, "Peet's Coffee Major Dickason's Blend Whole Bean 32 oz") is True
+    assert same_product(t, "Walmart Great Value Ground Pepper 32 oz") is False
+    res = [{"source": "Walmart", "extracted_price": 62.0, "title": "Great Value Pepper Shaker Set 32 oz"}]
+    assert pick_offers(res, t) == []

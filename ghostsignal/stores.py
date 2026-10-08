@@ -155,6 +155,15 @@ RETAILERS_OK = {
 }
 
 
+def same_product(a: str, b: str) -> bool:
+    """Same brand and most of the product's words. Catches a different item that happens to share a size."""
+    wa = {w for w in _words(a) if w not in _STOP and len(w) > 2}
+    wb = _words(b)
+    if not wa:
+        return False
+    return len(wa & wb) / len(wa) >= 0.6
+
+
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
     """Cheapest close match per store."""
     best: dict[str, dict] = {}
@@ -169,6 +178,8 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) 
             continue
         size_ok = same_size(amazon_title, r.get("title", ""))
         if size_ok is not True:       # only show a price when the pack size is confirmed the same
+            continue
+        if not same_product(amazon_title, r.get("title", "")):   # same size but a different item: not a match
             continue
         if key not in best or price < best[key]["price"]:
             best[key] = {"retailer": key, "price": float(price), "title": r.get("title", ""),
