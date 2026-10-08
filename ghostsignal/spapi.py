@@ -138,10 +138,16 @@ def update_fees(conn, asins: list[str]) -> int:
         price = snap and (snap["buy_box"] or snap["avg_price_90"])
         if not price:
             continue
-        data = _call("POST", f"/products/fees/v0/items/{asin}/feesEstimate", body={"FeesEstimateRequest": {
-            "MarketplaceId": MARKETPLACE_US, "IsAmazonFulfilled": True, "Identifier": f"gs-{asin}",
-            "PriceToEstimateFees": {"ListingPrice": {"CurrencyCode": "USD", "Amount": price}},
-        }})
+        try:
+            data = _call("POST", f"/products/fees/v0/items/{asin}/feesEstimate", body={"FeesEstimateRequest": {
+                "MarketplaceId": MARKETPLACE_US, "IsAmazonFulfilled": True, "Identifier": f"gs-{asin}",
+                "PriceToEstimateFees": {"ListingPrice": {"CurrencyCode": "USD", "Amount": price}},
+            }})
+        except SPAPIError as e:
+            if "QuotaExceeded" in str(e) or "429" in str(e):   # daily fee quota hit: keep what we got, try again next run
+                print(f"  fees: quota hit after {done}, stopping for now", flush=True)
+                break
+            raise
         ref, fba = parse_fees(data)
         if ref is None and fba is None:
             continue

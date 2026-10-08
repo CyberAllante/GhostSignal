@@ -175,11 +175,11 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 8):
         if not os.environ.get("KEEPA_API_KEY"):   # no Keepa: the free Seller API supplies price/rank/offers
             stale = _stale_asins(conn, stale_days, limit=2000)   # the Seller API costs no tokens, so no small cap
             if stale:
-                print("seller api market data:", spapi.refresh_market(conn, stale), flush=True)
+                _step("seller api market data", lambda: spapi.refresh_market(conn, stale))
         unchecked = _unchecked_gated(conn)
         if unchecked:
-            print("gated check:", spapi.check_gated(conn, unchecked), flush=True)
-        print("fees updated:", spapi.update_fees(conn, _fees_due(conn)), flush=True)
+            _step("gated check", lambda: spapi.check_gated(conn, unchecked))
+        _step("fees updated", lambda: spapi.update_fees(conn, _fees_due(conn, limit=150)))
     # Optional extras: a failure here must never stop scoring and alerts below.
     if stores.configured():
         _step("store prices", lambda: stores.find_prices(conn, stores.due_for_check(conn, max_prices)))
