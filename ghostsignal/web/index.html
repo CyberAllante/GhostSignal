@@ -374,6 +374,7 @@ function hotTiers(list) {
   const hasGap = (p) => p.best_source && p.economics.max_cost != null && p.best_source.price <= p.economics.max_cost
     && (p.best_source.price < p.economics.sale_price * 0.95);   // store price must actually leave room to profit
   return {
+    diamonds: leads.filter((p) => p.gated === "ungated" && (p.snapshot.offer_count || 0) <= 8 && (p.snapshot.fba_offers || 0) >= 1),
     bangers: leads.filter((p) => p.gated === "ungated" && hasGap(p) && p.best_source.verified),
     check: leads.filter((p) => p.gated === "ungated" && hasGap(p) && !p.best_source.verified),
     leads: leads.filter((p) => p.gated === "ungated" && !hasGap(p)),
@@ -385,7 +386,9 @@ const storeChips = (p) => (p.stores || []).length
   : "";
 function hotRow(p) {
   const s = p.snapshot || {}, e = p.economics, b = p.best_source;
+  const busy = priceJobs[p.asin] === "running";
   const store = b ? `${fav(b.retailer)}${esc(b.retailer)} ${money(b.price)}${b.verified ? "" : ` <span class="dim">(size?)</span>`}`
+    : busy ? `<button class="btn sm" disabled>Checking stores…</button>`
     : `<button class="btn sm" data-check="${p.asin}">${icon("search")}Check stores</button>`;
   return `<tr class="click" data-asin="${p.asin}">
     <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}</div>${storeChips(p)}</div></div></td>
@@ -405,15 +408,39 @@ async function pageHot() {
   if (!paint(seq, `
     <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.${budget.left != null ? ` <b>${budget.left} store searches left this month</b> (each Check stores uses 1 to 3).` : ""}</p></div>
       <div class="actions"><button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
-    ${section("🔥 Bangers", "Store price is under your max cost and the size is confirmed. Go buy.", t.bangers, "None yet. Store prices are checked about 10 products a day on your SerpAPI plan.")}
+    ${section("💎 Diamonds", "New-seller friendly: you can sell it, 8 or fewer sellers, at least one FBA seller, sells regularly. Start here.", t.diamonds, "No diamonds yet. They need a sellable product with few sellers and one FBA seller.")}
+    ${section("🔥 Bangers", "Store price is under your max cost and the size is confirmed. Go buy.", t.bangers, "None yet. Store checks use your SerpAPI searches, so run Check stores on the leads below.")}
     ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
     ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
     ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
-  $("#main").querySelectorAll("[data-check]").forEach((btn) => (btn.onclick = async (ev) => {
-    ev.stopPropagation(); btn.disabled = true; btn.textContent = "Checking…";
-    try { await api(`/api/products/${btn.dataset.check}/prices`, {}); productsAt = 0; toast("Store prices updated. Check pack sizes match."); pageHot(); }
-    catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Check stores"; }
-  }));
+  $("#main").querySelectorAll("[data-check]").forEach((btn) => (btn.onclick = (ev) => { ev.stopPropagation(); startPriceCheck(btn.dataset.check); }));
+  if (Object.values(priceJobs).includes("running")) pollPrices();
+}
+
+/* store-price checks run in the background; the page polls until each one finishes */
+let priceJobs = {};
+async function startPriceCheck(asin) {
+  try {
+    const r = await api(`/api/products/${asin}/prices`, {});
+    priceJobs[asin] = r.started ? "running" : "running";
+    toast("Checking stores… this takes about a minute.");
+    pollPrices();
+  } catch (err) { toast(err.message); }
+  pageHot();
+}
+let pollTimer = null;
+function pollPrices() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    try {
+      const s = await api("/api/prices/status");
+      const done = Object.keys(priceJobs).filter((a) => priceJobs[a] === "running" && s[a] && s[a] !== "running");
+      priceJobs = s;
+      if (done.length) { productsAt = 0; toast(`Store check finished for ${done.length} product${done.length > 1 ? "s" : ""}.`); if (location.hash.startsWith("#/hot") || location.hash.startsWith("#/holidays")) route(); }
+      else if (location.hash.startsWith("#/hot")) pageHot();
+      if (Object.values(s).includes("running")) pollPrices();
+    } catch (e) { /* network blip: try again */ pollPrices(); }
+  }, 4000);
 }
 
 /* ---------- holidays ---------- */

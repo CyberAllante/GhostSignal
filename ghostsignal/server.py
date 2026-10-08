@@ -98,6 +98,30 @@ def _invalidate_lists():
     _ungate_cache["at"] = 0.0
 
 
+price_jobs: dict[str, str] = {}      # asin -> "running" | "done" | "error: ..."
+
+
+def price_check_in_background(db_path, asin: str) -> bool:
+    """Store-price checks take up to a minute, so they run in a thread. The page polls /api/prices/status."""
+    if price_jobs.get(asin) == "running":
+        return False
+    price_jobs[asin] = "running"
+
+    def work():
+        from . import stores
+        c = db.connect(db_path)
+        try:
+            stores.find_prices(c, [asin])
+            price_jobs[asin] = "done"
+        except Exception as e:
+            price_jobs[asin] = f"error: {str(e)[:120]}"
+        finally:
+            c.close()
+            _invalidate_lists()
+    threading.Thread(target=work, daemon=True).start()
+    return True
+
+
 def make_handler(db_path):
     password = os.environ.get("GHOSTSIGNAL_PASSWORD", "")
     root = Path(__file__).resolve().parent.parent
@@ -252,6 +276,8 @@ def make_handler(db_path):
                     return self._send(200, {"brands": restrictions.parse_list(db.get_setting(conn, restrictions.SETTING))})
                 if url.path == "/api/invites":
                     return self._send(200, invites.listing(conn))
+                if url.path == "/api/prices/status":
+                    return self._send(200, price_jobs)
                 if url.path == "/api/stores/budget":
                     from . import stores
                     return self._send(200, {"configured": stores.configured(),
@@ -530,8 +556,8 @@ def make_handler(db_path):
                     from . import stores
                     if not stores.configured():
                         return self._send(400, {"error": "Store prices need SERPAPI_KEY in .env (see Setup)"})
-                    stores.find_prices(conn, [m.group(1)])
-                    return self._send(200, engine.product_view(conn, m.group(1)))
+                    started = price_check_in_background(db_path, m.group(1))
+                    return self._send(200, {"started": started, "asin": m.group(1), "status": price_jobs.get(m.group(1), "done")})
                 if url.path == "/api/sellers":
                     sid = importers.parse_seller_id(body.get("seller", ""))
                     if not sid:
