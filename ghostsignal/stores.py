@@ -155,13 +155,16 @@ RETAILERS_OK = {
 }
 
 
-def same_product(a: str, b: str) -> bool:
-    """Same brand and most of the product's words. Catches a different item that happens to share a size."""
+def product_overlap(a: str, b: str) -> float:
+    """Share of the Amazon title's product words found in the store title."""
     wa = {w for w in _words(a) if w not in _STOP and len(w) > 2}
     wb = _words(b)
-    if not wa:
-        return False
-    return len(wa & wb) / len(wa) >= 0.6
+    return len(wa & wb) / len(wa) if wa else 0.0
+
+
+def same_product(a: str, b: str, threshold: float = 0.6) -> bool:
+    """Same brand and most of the product's words. Catches a different item that happens to share a size."""
+    return product_overlap(a, b) >= threshold
 
 
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
@@ -177,10 +180,14 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) 
         if match < (0.3 if r.get("via") == "lens" else min_match):
             continue
         size_ok = same_size(amazon_title, r.get("title", ""))
-        if size_ok is not True:       # only show a price when the pack size is confirmed the same
+        if size_ok is False:          # a different pack size is never a match
             continue
-        if not same_product(amazon_title, r.get("title", "")):   # same size but a different item: not a match
-            continue
+        if size_ok is True:           # size confirmed: needs most of the product words to match
+            if not same_product(amazon_title, r.get("title", "")):
+                continue
+        else:                         # size not stated: only a close product match, shown as "likely" and unverified
+            if product_overlap(amazon_title, r.get("title", "")) < 0.75:
+                continue
         if key not in best or price < best[key]["price"]:
             best[key] = {"retailer": key, "price": float(price), "title": r.get("title", ""),
                          "url": r.get("product_link") or r.get("link") or "", "match": round(match, 2),
