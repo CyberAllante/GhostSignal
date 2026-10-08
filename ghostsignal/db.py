@@ -164,15 +164,22 @@ def now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+_migrated: set[str] = set()   # schema/migration runs once per database file per process
+
+
 def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
     path = Path(path or DEFAULT_DB)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30)     # wait for a busy database instead of failing at once
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    if str(path) == ":memory:" or str(path) not in _migrated:
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        if str(path) != ":memory:":
+            _migrated.add(str(path))
     return conn
 
 
