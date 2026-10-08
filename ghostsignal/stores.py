@@ -167,6 +167,27 @@ def same_product(a: str, b: str, threshold: float = 0.6) -> bool:
     return product_overlap(a, b) >= threshold
 
 
+MARKETPLACES = ("ebay", "mercari", "poshmark", "depop", "etsy", "aliexpress", "temu", "tiktokshop", "facebook", "offerup")
+
+
+def classify_results(results: list[dict]) -> str:
+    """What kind of sellers the search found: 'retail' (a real store had it), 'resellers' (only eBay/Mercari/3P
+    marketplace sellers: an Amazon-first product), or 'nothing'."""
+    if not results:
+        return "nothing"
+    retail = reseller = 0
+    for r in results:
+        src = (r.get("source") or "").lower()
+        key = store_key(src)
+        if key and key in RETAILERS_OK:
+            retail += 1
+        elif any(m in src.replace(" ", "") for m in MARKETPLACES) or " - " in src:
+            reseller += 1
+    if retail:
+        return "retail"
+    return "resellers" if reseller >= 3 else "nothing"
+
+
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
     """Cheapest close match per store."""
     best: dict[str, dict] = {}
@@ -237,12 +258,20 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
         if not p or not p["title"]:
             continue
         # Title search is fast (~1s); barcode search can take 30s+, so it's the fallback, then the photo search.
-        offers = pick_offers(_safe(search, search_query(p["title"]), location), p["title"]); used += 1
+        raw = _safe(search, search_query(p["title"]), location); used += 1
+        offers = pick_offers(raw, p["title"])
         if not offers and p["upc"] and used < budget:
-            offers = pick_offers(_safe(search, search_query(p["title"], p["upc"]), location), p["title"]); used += 1
+            more = _safe(search, search_query(p["title"], p["upc"]), location); used += 1
+            raw += more; offers = pick_offers(more, p["title"])
         if not offers and p["image_url"] and used < budget:
-            offers = pick_offers(_safe(search_lens, p["image_url"]), p["title"]); used += 1
+            more = _safe(search_lens, p["image_url"]); used += 1
+            raw += more; offers = pick_offers(more, p["title"])
         searched += 1
+        kind = classify_results(raw)
+        note = ("matched" if offers else
+                "no_match_retail" if kind == "retail" else      # stores had similar items, but not this exact one
+                "resellers_only" if kind == "resellers" else "nothing_found")
+        conn.execute("UPDATE products SET store_note = ? WHERE asin = ?", (f"{note}@{db.now()}", asin))
         for o in offers[:10]:
             db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
                           note=f"{o['via']} · {int(o['match'] * 100)}% match"

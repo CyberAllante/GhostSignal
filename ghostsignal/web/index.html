@@ -365,7 +365,7 @@ const HOT_RULES = "You can sell it (or one approval away) · real store brand, n
 function isLead(p) {
   const s = p.snapshot || {}, e = p.economics;
   return !p.restricted && (p.gated === "ungated" || p.gated === "approval")
-    && p.enrichment?.sold_in_stores !== false && !s.amazon_price
+    && p.enrichment?.sold_in_stores !== false && !String(p.store_note || "").startsWith("resellers_only") && !s.amazon_price
     && (s.offer_count || 0) >= 2 && (e.sale_price || 0) >= 18 && s.sales_rank && s.sales_rank <= 80000
     && (e.profit == null || e.profit > 0);      // a lead must make money at the best channel (or not be priced yet)
 }
@@ -387,8 +387,11 @@ const storeChips = (p) => (p.stores || []).length
 function hotRow(p) {
   const s = p.snapshot || {}, e = p.economics, b = p.best_source;
   const busy = priceJobs[p.asin] === "running";
+  const note = String(p.store_note || "").split("@")[0], noteAt = String(p.store_note || "").split("@")[1];
+  const OUTCOME = { no_match_retail: "Stores have similar items, not this exact one", resellers_only: "Only eBay/Mercari resellers found: no store carries it", nothing_found: "Nothing found in stores" };
   const store = b ? `${fav(b.retailer)}${esc(b.retailer)} ${money(b.price)}${b.verified ? "" : ` <span class="dim">(size?)</span>`}`
     : busy ? `<button class="btn sm" disabled>Checking stores…</button>`
+    : OUTCOME[note] ? `<span class="dim" style="font-size:12px">${OUTCOME[note]}${noteAt ? ` · ${ago(noteAt)}` : ""}</span> <button class="btn sm" data-check="${p.asin}" title="Check again">↻</button>`
     : `<button class="btn sm" data-check="${p.asin}">${icon("search")}Check stores</button>`;
   return `<tr class="click" data-asin="${p.asin}">
     <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}</div>${storeChips(p)}</div></div></td>

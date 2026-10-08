@@ -88,14 +88,41 @@ _pin_fails = {"n": 0, "locked_until": 0.0}
 PIN_MAX_FAILS, PIN_LOCK_SECONDS = 5, 3600
 
 
-_list_cache = {"key": None, "at": 0.0, "rows": None}
+_list_cache = {"key": None, "at": 0.0, "rows": None, "stale": False, "building": False}
 _ungate_cache = {"at": 0.0, "data": None}
-LIST_TTL = 60
+LIST_TTL = 300
+_db_path_for_cache = {"path": None}
 
 
-def _invalidate_lists():
-    _list_cache["at"] = 0.0
+def _invalidate_lists(asins=None):
+    """Mark the product list for a refresh. With specific ASINs and a warm cache, only those rows are rebuilt
+    (fast); otherwise the whole list is rebuilt in the background while the old one keeps serving."""
     _ungate_cache["at"] = 0.0
+    rows = _list_cache.get("rows")
+    if asins and rows and _db_path_for_cache["path"]:
+        try:
+            c = db.connect(_db_path_for_cache["path"])
+            fresh = {a: engine.list_view(c, a) for a in asins}
+            c.close()
+            _list_cache["rows"] = [fresh.get(r["asin"], r) for r in rows] + [v for a, v in fresh.items()
+                                                                            if a not in {r["asin"] for r in rows}]
+            return
+        except Exception as e:
+            print("row refresh failed:", e, flush=True)
+    _list_cache["stale"] = True
+
+
+def _rebuild_list(db_path, key):
+    archived, full = key
+    c = db.connect(db_path)
+    try:
+        view = engine.product_view if full else engine.list_view
+        rows = [view(c, r[0]) for r in c.execute(
+            f"SELECT asin FROM products WHERE status {'=' if archived else '!='} 'dead'")]
+    finally:
+        c.close()
+    _list_cache.update(key=key, at=time.time(), rows=rows, stale=False, building=False)
+    return rows
 
 
 price_jobs: dict[str, str] = {}      # asin -> "running" | "done" | "error: ..."
@@ -117,12 +144,13 @@ def price_check_in_background(db_path, asin: str) -> bool:
             price_jobs[asin] = f"error: {str(e)[:120]}"
         finally:
             c.close()
-            _invalidate_lists()
+            _invalidate_lists([asin])
     threading.Thread(target=work, daemon=True).start()
     return True
 
 
 def make_handler(db_path):
+    _db_path_for_cache["path"] = db_path
     password = os.environ.get("GHOSTSIGNAL_PASSWORD", "")
     root = Path(__file__).resolve().parent.parent
 
@@ -313,13 +341,12 @@ def make_handler(db_path):
                     archived = bool(qs.get("archived"))
                     full = bool(qs.get("full"))
                     key = (archived, full)
-                    if _list_cache["key"] == key and time.time() - _list_cache["at"] < LIST_TTL:
-                        rows = list(_list_cache["rows"])
-                    else:
-                        view = engine.product_view if full else engine.list_view
-                        rows = [view(conn, r[0]) for r in conn.execute(
-                            f"SELECT asin FROM products WHERE status {'=' if archived else '!='} 'dead'")]
-                        _list_cache.update(key=key, at=time.time(), rows=list(rows))
+                    warm = _list_cache["key"] == key and _list_cache["rows"] is not None
+                    expired = time.time() - _list_cache["at"] > LIST_TTL
+                    if warm and (_list_cache["stale"] or expired) and not _list_cache["building"]:
+                        _list_cache["building"] = True        # serve the old list now, rebuild behind it
+                        threading.Thread(target=_rebuild_list, args=(db_path, key), daemon=True).start()
+                    rows = list(_list_cache["rows"]) if warm else _rebuild_list(db_path, key)
                     if qs.get("verdict"):
                         rows = [r for r in rows if r["verdict"] == qs["verdict"].upper()]
                     if qs.get("q"):
@@ -479,8 +506,15 @@ def make_handler(db_path):
             self.wfile.write(data)
 
         def do_POST(self):
-            _invalidate_lists()
             url = urlparse(self.path)
+            _pm = ASIN_PATH.match(url.path)
+            if url.path in ("/login", "/api/ingest/orders", "/api/refresh", "/api/discover", "/api/holidays/pull",
+                            "/api/invites", "/api/invites/revoke", "/api/settings"):
+                pass                                   # nothing in the product list changes
+            elif _pm:
+                _invalidate_lists([_pm.group(1)])      # one product changed: refresh just that row
+            else:
+                _invalidate_lists()
             if url.path == "/login":
                 return self._login()
             if url.path == "/api/ingest/orders":

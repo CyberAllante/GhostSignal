@@ -254,7 +254,10 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     if e.get("ip_complaint_risk") == "high":
         flags.append("Brand known for IP complaints")
         penalty += 15
-    amazon_only = e.get("sold_in_stores") is False and best is None
+    resellers_only = str(product.get("store_note") or "").startswith("resellers_only")
+    amazon_only = (e.get("sold_in_stores") is False or resellers_only) and best is None
+    if resellers_only:
+        flags.append("Store check found only eBay/Mercari resellers: no retail store carries this")
     if amazon_only:
         flags.append("No store sells this (Amazon-only brand) — nothing to buy for resale")
         penalty += 25

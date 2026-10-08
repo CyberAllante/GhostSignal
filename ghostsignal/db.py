@@ -195,8 +195,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # one-time: older checks called every NOT_ELIGIBLE "blocked"; only closed brands really are
     conn.execute("""UPDATE eligibility SET status = 'limited' WHERE source = 'spapi' AND status = 'blocked'
                     AND lower(COALESCE(reason, '')) NOT LIKE '%not accepting applications%'""")
-    if "weight_lb" not in {r["name"] for r in conn.execute("PRAGMA table_info(products)")}:
+    pcols = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+    if "weight_lb" not in pcols:
         conn.execute("ALTER TABLE products ADD COLUMN weight_lb REAL")     # package weight, for FBM label cost
+    if "store_note" not in pcols:
+        conn.execute("ALTER TABLE products ADD COLUMN store_note TEXT")    # outcome of the last store-price check
     inv = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)")}
     for col, ddl in (("pred_verdict", "TEXT"), ("pred_score", "INTEGER"), ("pred_profit", "REAL")):
         if col not in inv:
@@ -221,7 +224,7 @@ def upsert_product(conn: sqlite3.Connection, asin: str, **fields) -> None:
     """Insert a product or fill in fields we didn't know yet (never blank out known data)."""
     asin = asin.strip().upper()
     existing = conn.execute("SELECT * FROM products WHERE asin = ?", (asin,)).fetchone()
-    allowed = {"title", "brand", "category", "upc", "image_url", "status", "tags", "notes", "origin", "last_checked", "weight_lb"}
+    allowed = {"title", "brand", "category", "upc", "image_url", "status", "tags", "notes", "origin", "last_checked", "weight_lb", "store_note"}
     fields = {k: v for k, v in fields.items() if k in allowed and v not in (None, "")}
     if existing is None:
         fields.setdefault("first_seen", now())
