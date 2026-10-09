@@ -134,6 +134,17 @@ def _invalidate_lists(asins=None):
     _list_cache["stale"] = True
 
 
+def is_lead(r: dict) -> bool:
+    """The Hot filters (same as the page's isLead): sellable or one approval away, a real store brand, Amazon not on
+    the listing, $18+, ranked under 80k, and not losing money."""
+    s, e = r.get("snapshot") or {}, r.get("economics") or {}
+    return bool(not r.get("restricted") and r.get("gated") in ("ungated", "approval")
+                and (r.get("enrichment") or {}).get("sold_in_stores") is not False and not r.get("import_brand")
+                and not str(r.get("store_note") or "").startswith("resellers_only") and not s.get("amazon_price")
+                and (s.get("offer_count") or 0) >= 1 and (e.get("sale_price") or 0) >= 18
+                and s.get("sales_rank") and s["sales_rank"] <= 80_000 and (e.get("profit") is None or e["profit"] > 0))
+
+
 def _rebuild_list(db_path, key):
     archived, full = key
     c = db.connect(db_path)
@@ -358,6 +369,10 @@ def make_handler(db_path):
                 if url.path == "/api/ungate":
                     if time.time() - _ungate_cache["at"] > LIST_TTL or _ungate_cache["data"] is None:
                         _ungate_cache.update(at=time.time(), data=ungate.targets(conn))
+                    if qs.get("slim"):                      # Today only needs the group names and counts
+                        d = _ungate_cache["data"]
+                        return self._send(200, {**d, **{k: [{x: v for x, v in g.items() if x != "items"} for g in d[k]]
+                                                        for k in ("categories", "brands", "limited")}})
                     return self._send(200, _ungate_cache["data"])
                 if url.path == "/api/outcomes":
                     return self._send(200, db.outcomes(conn))
@@ -371,6 +386,10 @@ def make_handler(db_path):
                         _list_cache["building"] = True        # serve the old list now, rebuild behind it
                         threading.Thread(target=_rebuild_list, args=(db_path, key), daemon=True).start()
                     rows = list(_list_cache["rows"]) if warm else _rebuild_list(db_path, key)
+                    if qs.get("scope") == "hot":            # Hot and Today only need the leads, not all 8k products
+                        leads = sorted((r for r in rows if is_lead(r)), key=lambda r: r["snapshot"]["sales_rank"])
+                        return self._send(200, {"rows": leads, "total": len(rows),
+                                                "sellable": sum(1 for r in rows if r.get("gated") == "ungated" and not r.get("restricted"))})
                     if qs.get("verdict"):
                         rows = [r for r in rows if r["verdict"] == qs["verdict"].upper()]
                     if qs.get("q"):
@@ -787,6 +806,8 @@ def serve(db_path=None, host=None, port=None):
         threading.Thread(target=_scheduler, args=(db_path, hours), daemon=True).start()
         print(f"Auto-run every {hours:g}h", flush=True)
     httpd = ThreadingHTTPServer((host, port), make_handler(db_path))
+    # build the product list now, so the first page after a deploy doesn't wait for it
+    threading.Thread(target=lambda: _rebuild_list(db_path, (False, False)), daemon=True).start()
     print(f"GhostSignal dashboard on {host}:{port}", flush=True)
     try:
         httpd.serve_forever()

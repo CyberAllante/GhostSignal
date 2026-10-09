@@ -330,7 +330,7 @@ let products = [], view = { verdict: "", q: "", gated: "actionable", cat: "", ma
 function toast(m) { const t = $("#toast"); t.textContent = m; t.style.display = "block"; clearTimeout(t.h); t.h = setTimeout(() => (t.style.display = "none"), 3500); }
 let productsAt = 0;
 async function api(path, body) {
-  if (body) productsAt = 0;   // any change: reload the product list next time
+  if (body) { productsAt = 0; hotAt = 0; }   // any change: reload the product lists next time
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return (r.headers.get("content-type") || "").includes("json") ? r.json() : r.text();
@@ -354,6 +354,12 @@ const fav = (r) => `<img class="fav" alt="" src="https://www.google.com/s2/favic
 const thumb = (p) => p.image_url ? `<span class="thumb" style="background-image:url('${esc(p.image_url)}')"></span>` : `<span class="thumb">${esc((p.title || p.asin || "?")[0])}</span>`;
 
 /* ---------- pages ---------- */
+let hot = { rows: [], total: 0, sellable: 0 }, hotAt = 0;
+async function loadHot(force) {
+  if (force || !hotAt || Date.now() - hotAt > 30000) { hot = await api("/api/products?scope=hot"); hotAt = Date.now(); }
+  $("#navProducts").textContent = hot.total || "";
+  return hot.rows;
+}
 async function loadProducts(force) {
   if (force || !products.length || Date.now() - productsAt > 30000) { products = await api("/api/products"); productsAt = Date.now(); }
   $("#navProducts").textContent = products.length || "";
@@ -428,8 +434,7 @@ function brandCard(brands) {
 }
 async function pageHot() {
   const seq = routeSeq;
-  await loadProducts();
-  const t = hotTiers(products);
+  const t = hotTiers(await loadHot());
   const budget = await api("/api/stores/budget").catch(() => ({}));
   $("#navHot").textContent = (t.diamonds.length + t.bangers.length + t.check.length) || "";
   const section = (title, sub, rows, empty) => !rows.length ? `<div class="card empty-sec" style="margin-bottom:12px;padding:12px 18px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b>${title}</b><span class="dim">0</span><span class="dim" style="font-size:13px">${empty}</span></div>` : `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
@@ -469,7 +474,7 @@ function pollPrices() {
       const s = await api("/api/prices/status");
       const done = Object.keys(priceJobs).filter((a) => priceJobs[a] === "running" && s[a] && s[a] !== "running");
       priceJobs = s;
-      if (done.length) { productsAt = 0; toast(`Store check finished for ${done.length} product${done.length > 1 ? "s" : ""}.`); if (location.hash.startsWith("#/hot") || location.hash.startsWith("#/holidays")) route(); }
+      if (done.length) { productsAt = 0; hotAt = 0; toast(`Store check finished for ${done.length} product${done.length > 1 ? "s" : ""}.`); if (location.hash.startsWith("#/hot") || location.hash.startsWith("#/holidays")) route(); }
       else if (location.hash.startsWith("#/hot")) pageHot();
       if (Object.values(s).includes("running")) pollPrices();
     } catch (e) { /* network blip: try again */ pollPrices(); }
@@ -517,14 +522,13 @@ const sub = (p) => {
 
 async function pageDashboard() {
   const seq = routeSeq;
-  const [, demo, ung, st, hs] = await Promise.all([loadProducts(), api("/api/demo"), api("/api/ungate"), api("/api/refresh/status"), api("/api/holidays").catch(() => [])]);
-  ungateData = ung;
-  const t = hotTiers(products.filter((p) => !p.restricted));
+  const [rows, demo, ung, st, hs] = await Promise.all([loadHot(), api("/api/demo"), api("/api/ungate?slim=1"), api("/api/refresh/status"), api("/api/holidays").catch(() => [])]);
+  const t = hotTiers(rows);
   const toCheck = [...t.check, ...t.shelf, ...t.leads].slice(0, 8);
   const approvals = [...ung.categories.map((g) => ({ ...g, kind: "categories" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "brands" }))]
     .filter((g) => g.tracking?.status !== "approved").sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
   const nextH = (hs || []).filter((h) => h.status !== "late").slice(0, 3);
-  const sellable = products.filter((p) => p.gated === "ungated" && !p.restricted).length;
+  const sellable = hot.sellable;
   const step = (n, title, sub, body) => `<div class="card" style="margin-bottom:20px"><div class="card-h"><div><h2><span class="dim" style="font-weight:400">${n}.</span> ${title}</h2><p>${sub}</p></div></div><div class="card-b">${body}</div></div>`;
   const prow = (p, right) => `<div class="mini-row" data-asin="${p.asin}">${thumb(p)}<div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${sub(p)}</div></div>${right}</div>`;
   if (!paint(seq, `
@@ -1041,7 +1045,7 @@ async function discoverMore() {
 async function scan() {
   const r = await api("/api/refresh", {});
   toast(r.started ? "Pulling fresh data from Amazon. This takes a while; the page updates when it's done." : "A data pull is already running.");
-  const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); productsAt = 0; route(); } }, 10000);
+  const poll = setInterval(async () => { const s = await api("/api/refresh/status"); if (!s.running) { clearInterval(poll); toast("Data pull finished."); productsAt = 0; hotAt = 0; route(); } }, 10000);
 }
 async function refreshSellers(b) {
   b.disabled = true;
