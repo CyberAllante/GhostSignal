@@ -23,6 +23,7 @@ WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
 ORDER = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 INV_PATH = re.compile(r"^/api/inventory/(\d+)$")
+VERSION = os.environ.get("RAILWAY_DEPLOYMENT_ID") or os.environ.get("RAILWAY_GIT_COMMIT_SHA") or str(int(time.time()))
 SELLER_PRODUCTS = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/products$")
 SELLER_PATH = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/(status|remove|pull)$")
 
@@ -294,6 +295,8 @@ def make_handler(db_path):
                 return None
             if self._public_asset(path):
                 return None
+            if path == "/api/version":            # the open app reloads itself when this changes (new deploy)
+                return self._send(200, {"version": VERSION})
             if path in ("/contribute", "/api/invite/check", "/extension.zip") or (
                     path == "/tools/amazon_orders_scraper.js" and "c=" in self.path):
                 return self._invite_get(path)
