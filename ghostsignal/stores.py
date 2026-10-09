@@ -251,6 +251,39 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5, 
     return sorted(best.values(), key=lambda o: o["price"])
 
 
+def money_str(x: float) -> str:
+    return f"${x:,.2f}"
+
+
+def scaled_offers(results: list[dict], amazon_title: str, brand: str | None = None) -> list[dict]:
+    """The same product in a different size, priced per Amazon unit: Walmart's 16 oz bag at $6.98 for a 32 oz
+    listing = $13.96. Never a source to buy from (you'd be shipping two bags, not the listing's one), but if even
+    that per-ounce price is over your buy-under, the product can't work and drops off Hot."""
+    bw = _brand_words(brand) - {"generic"}
+    sa = total_size(sizes(amazon_title))
+    best: dict[str, dict] = {}
+    for r in results:
+        key, price, title = store_key(r.get("source", "")), r.get("extracted_price"), r.get("title", "")
+        if not key or key not in RETAILERS_OK or not isinstance(price, (int, float)) or price <= 0:
+            continue
+        if bw and not (bw & _stem(title)):
+            continue
+        if product_overlap(amazon_title, title) < (0.45 if bw else 0.6):   # brand already matched: looser wording
+            continue
+        sb = total_size(sizes(title + " " + (r.get("product_link") or r.get("link") or "")))
+        unit = next((k for k in ("oz", "ml", "count") if k in sa and k in sb and sb[k]), None)
+        if not unit:
+            continue
+        ratio = sa[unit] / sb[unit]
+        if not 0.2 <= ratio <= 6 or abs(ratio - 1) < 0.04:
+            continue
+        scaled = round(price * ratio, 2)
+        if key not in best or scaled < best[key]["price"]:
+            best[key] = {"retailer": key, "price": scaled, "store_price": float(price), "store_title": title,
+                         "url": r.get("product_link") or r.get("link") or "", "ratio": round(ratio, 2)}
+    return sorted(best.values(), key=lambda o: o["price"])
+
+
 def searches_left() -> int | None:
     """SerpAPI searches left this month (the account endpoint itself is free)."""
     try:
@@ -306,6 +339,12 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
                 "no_match_retail" if kind == "retail" else      # stores had similar items, but not this exact one
                 "resellers_only" if kind == "resellers" else "nothing_found")
         conn.execute("UPDATE products SET store_note = ? WHERE asin = ?", (f"{note}@{db.now()}", asin))
+        if not offers:            # only other sizes: store the per-unit math so a dead product gets ruled out
+            for o in scaled_offers(raw, p["title"], p["brand"])[:3]:
+                db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
+                              note=f"other size, scaled: {money_str(o['store_price'])} x {o['ratio']:g} for this listing's size"
+                                   f" (not a buy, the math only): {o['store_title'][:100]}")
+                saved += 1
         for o in offers[:10]:
             db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],
                           note=f"{o['via']} · {int(o['match'] * 100)}% match"

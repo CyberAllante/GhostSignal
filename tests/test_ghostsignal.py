@@ -714,3 +714,12 @@ def test_brand_check_ignores_apostrophes_and_short_branded_titles_pass():
     assert stores.pick_offers(peets, "Peet's Coffee Major Dickason's Blend Whole Bean Coffee 32 oz", brand="Peet's Coffee")
     wax = [{"source": "Walmart", "extracted_price": 9.0, "title": "Renaissance Wax Polish 200 ml"}]
     assert stores.pick_offers(wax, "Renaissance Wax Polish, 200 ml", brand="Renaissance")
+
+
+def test_other_size_is_scaled_to_the_listing():
+    from ghostsignal import stores
+    r = [{"source": "Walmart", "extracted_price": 6.98, "title": "Seven Sundays Protein Oats Wild Berry Instant Oatmeal Flax Chia, 16 oz"}]
+    t = "Seven-Sundays Protein Oat with Flax & Chia Seeds, Wildberry flavor, 32 Oz Bag"
+    assert stores.pick_offers(r, t, brand="Seven Sundays") == []           # not the same product to buy
+    o = stores.scaled_offers(r, t, "Seven Sundays")
+    assert o and o[0]["price"] == 13.96 and o[0]["ratio"] == 2

@@ -196,7 +196,7 @@ def priority(view: dict) -> int:
 def _verified(note: str | None) -> bool:
     """A store price you can act on: same size confirmed and not an old barcode-database price."""
     n = note or ""
-    return "size not stated" not in n and "may be old" not in n
+    return "size not stated" not in n and "may be old" not in n and "other size, scaled" not in n
 
 
 def list_view(conn, asin: str, cfg: Config | None = None) -> dict:

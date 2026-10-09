@@ -141,6 +141,8 @@ def is_lead(r: dict) -> bool:
     return bool(not r.get("restricted") and r.get("gated") in ("ungated", "approval")
                 and (r.get("enrichment") or {}).get("sold_in_stores") is not False and not r.get("import_brand")
                 and not str(r.get("store_note") or "").startswith("resellers_only") and not s.get("amazon_price")
+                and not ((r.get("best_source") or {}).get("price") is not None and e.get("max_cost") is not None
+                         and r["best_source"]["price"] > e["max_cost"])            # checked: stores cost too much
                 and (s.get("offer_count") or 0) >= 1 and (e.get("sale_price") or 0) >= 18
                 and s.get("sales_rank") and s["sales_rank"] <= 80_000 and (e.get("profit") is None or e["profit"] > 0))
 
