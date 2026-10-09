@@ -552,9 +552,13 @@ def test_store_match_rejects_different_sizes():
 
 def test_unverified_size_store_price_caps_at_research():
     snap = {"buy_box": 30.0, "avg_price_90": 29.0, "monthly_sold": 500, "offer_count": 5, "fba_fee": 4.0}
-    src = [{"retailer": "samsclub", "price": 10.0, "pack_qty": 1, "in_stock": 1, "note": "shopping · 82% match · size not stated, check it: x"}]
+    src = [{"retailer": "samsclub", "price": 12.0, "pack_qty": 1, "in_stock": 1, "note": "shopping · 82% match · size not stated, check it: x"}]
     s = score_product({}, snap, src, {"orders": 3, "buyers": 3, "repeat_buyers": 1}, eligibility={"status": "ungated"})
     assert s.verdict == "RESEARCH" and any("unverified" in f for f in s.flags)
+    tiny = [{**src[0], "price": 6.0}]                      # a fifth of the Amazon price, size unknown: a smaller pack
+    assert score_product({}, snap, tiny, {}, eligibility={"status": "ungated"}).best_source is None
+    sim = [{**src[0], "note": "similar item at this store, not confirmed the same size or product: x"}]
+    assert score_product({}, snap, sim, {}, eligibility={"status": "ungated"}).best_source is None
 
 
 def test_amazon_detected_by_its_offer_seller_id():

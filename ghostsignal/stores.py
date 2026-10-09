@@ -339,6 +339,21 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
                 "no_match_retail" if kind == "retail" else      # stores had similar items, but not this exact one
                 "resellers_only" if kind == "resellers" else "nothing_found")
         conn.execute("UPDATE products SET store_note = ? WHERE asin = ?", (f"{note}@{db.now()}", asin))
+        # what the stores do carry (same brand, not a confirmed match), so you can see it and judge for yourself
+        if p["brand"] or offers:
+            taken = {o["retailer"] for o in offers}
+            bw = _brand_words(p["brand"]) - {"generic"}
+            sim: dict[str, dict] = {}
+            for r in raw:
+                key, price, title = store_key(r.get("source", "")), r.get("extracted_price"), r.get("title", "")
+                if (not key or key not in RETAILERS_OK or key in taken or not isinstance(price, (int, float))
+                        or (bw and not (bw & _stem(title)))):
+                    continue
+                if key not in sim or price < sim[key]["price"]:
+                    sim[key] = {"price": float(price), "title": title, "url": r.get("product_link") or r.get("link") or ""}
+            for key, o in sorted(sim.items(), key=lambda kv: kv[1]["price"])[:4]:
+                db.add_source(conn, asin, key, o["price"], url=o["url"],
+                              note=f"similar item at this store, not confirmed the same size or product: {o['title'][:110]}")
         if not offers:            # only other sizes: store the per-unit math so a dead product gets ruled out
             for o in scaled_offers(raw, p["title"], p["brand"])[:3]:
                 db.add_source(conn, asin, o["retailer"], o["price"], url=o["url"],

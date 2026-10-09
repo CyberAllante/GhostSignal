@@ -899,7 +899,9 @@ function drawer(p) {
   const editGated = notAmazon ? "" : `<div class="sec"><h3>Can you sell it on Amazon?</h3><div class="seg">${[["ungated", "Yes"], ["approval", "Needs approval"], ["blocked", "No"]].map(([k, l]) =>
           `<button class="btn sm ${p.gated === k ? "on-" + k : ""}" data-gated="${k}">${l}</button>`).join("")}
           <a class="btn sm" href="${p.links.sellercentral}" target="_blank" rel="noopener">Seller Central ↗</a></div></div>`;
-  const srcs = p.sources.map((x) => `<a class="src ${p.best_source?.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
+  const isSim = (x) => (x.note || "").startsWith("similar item");
+  const simRows = p.sources.filter(isSim).map((x) => `<a class="src" href="${esc(x.url || "#")}" target="_blank" rel="noopener"><div style="min-width:0"><div>${fav(x.retailer)}<span class="r">${esc(domain(x.retailer))}</span></div><div class="note">${esc((x.note || "").split(": ").slice(1).join(": "))}</div></div><b class="dim">${money(x.price)}</b></a>`).join("");
+  const srcs = p.sources.filter((x) => !isSim(x)).map((x) => `<a class="src ${p.best_source?.id === x.id ? "best" : ""}" href="${esc(x.url || p.links.retail[x.retailer]?.url || "#")}" target="_blank" rel="noopener">
           <div style="min-width:0"><div>${fav(x.retailer)}<span class="r">${esc(domain(x.retailer))}</span>${x.pack_qty > 1 ? ` <span class="x2">× ${x.pack_qty}</span>` : ""}${x.promo ? ` <span class="x2">· ${esc(x.promo)}</span>` : ""}</div>
           ${x.note ? `<div class="note">${esc(x.note)}</div>` : ""}</div><b>${money(x.price)}</b></a>`).join("");
   const bought = p.inventory.map((i) => `<div class="src"><div><div>${i.qty} × ${money(i.unit_cost)} ${i.store ? "from " + esc(i.store) : ""}</div><div class="x2">${ago(i.bought_at)}</div></div><div>${chPill(i.channel)} <span class="pill ${i.status}">${INV[i.status]}</span></div></div>`).join("");
@@ -928,6 +930,7 @@ function drawer(p) {
       ${canSell}
 
       ${srcs || bought ? `<div class="sec"><h3>${srcs ? "Where to buy" : "You bought this"}</h3>${srcs}${srcs && bought ? `<h3 style="margin-top:14px">You bought this</h3>` : ""}${bought}</div>` : ""}
+      ${simRows ? `<div class="sec"><h3>What stores carry (not confirmed the same)</h3><div class="hint" style="margin-bottom:8px">Same brand, but a different size, flavor or pack, or the size isn't listed. Not used in the profit math. Open one to compare.</div>${simRows}</div>` : ""}
 
       <div class="sec"><div class="linkrow">
         ${p.links.amazon ? `<a href="${p.links.amazon}" target="_blank" rel="noopener">Amazon ↗</a><a href="${p.links.keepa}" target="_blank" rel="noopener">Keepa ↗</a>` : `<a href="${p.links.amazon_search}" target="_blank" rel="noopener">Search Amazon ↗</a>`}

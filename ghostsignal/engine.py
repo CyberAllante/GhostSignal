@@ -206,7 +206,8 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
     s = dict(snap) if snap else None
     stores = sorted(({"retailer": x["retailer"], "price": round(x["price"] * (x.get("pack_qty") or 1), 2),
                       "verified": _verified(x.get("note")), "url": x.get("url") or ""}
-                     for x in sources if x.get("price") is not None and x.get("in_stock") != 0), key=lambda x: x["price"])
+                     for x in sources if x.get("price") is not None and x.get("in_stock") != 0
+                     and not (x.get("note") or "").startswith("similar item")), key=lambda x: x["price"])
     enr = _enrichment(conn, asin)
     el = db.get_eligibility(conn, asin)
     view = {

@@ -190,7 +190,12 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     for s in sources:
         if s.get("price") is None or s.get("in_stock") == 0:
             continue
+        note = s.get("note") or ""
+        if note.startswith("similar item"):            # shown for reference only, never a source
+            continue
         unit_cost = s["price"] * (s.get("pack_qty") or 1)
+        if "size not stated" in note and sale and unit_cost < sale * 0.35:
+            continue      # an unconfirmed size at a third of Amazon's price is a smaller pack, not a deal
         if best is None or unit_cost < best["unit_cost"]:
             best = {**s, "unit_cost": round(unit_cost, 2)}
     cost = best["unit_cost"] if best else None
