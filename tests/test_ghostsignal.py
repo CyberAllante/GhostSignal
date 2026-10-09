@@ -656,3 +656,15 @@ def test_pack_totals_and_url_sizes():
     assert same_size("Peet's Coffee 12 oz 2 Pack", "Peet's Coffee 24 oz total") is True
     res = [{"source": "Walmart", "extracted_price": 15.0, "title": "Y.S. Eco Bee Farms Raw Honey, Unfiltered, Unpasteurized", "link": "https://www.walmart.com/ip/Y-S-Eco-Bee-Farms-Raw-Honey-22-oz-Paste/177851669"}]
     assert pick_offers(res, A) == []
+
+
+def test_knockoff_brands_are_not_sourceable():
+    from ghostsignal.scoring import looks_import
+    assert looks_import("SHISHUVIN", "for Milwaukee 49-16-2748 Trimmer Head")
+    assert looks_import("Generic", "Phone case")
+    assert looks_import("Trgowaul", "Rack", {"brand_type": "generic_import"})
+    assert looks_import("Utopia Bedding", "Pillow", {"brand_type": "amazon_first"})
+    assert not looks_import("CRAYOLA", "Colored Pencils")
+    assert not looks_import("Hershey's", "Variety pack")
+    assert not looks_import("SHISHUVIN", "x", {"brand_type": "national"})   # the AI's call wins
+    assert not looks_import(None, "Brand not loaded yet")

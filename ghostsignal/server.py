@@ -23,6 +23,7 @@ WEB = Path(__file__).parent / "web"
 ASIN_PATH = re.compile(r"^/api/products/([A-Z0-9]{10})(?:/(source|status|snapshot|gated|prices|channel|inventory))?$")
 ORDER = {"BUY": 2, "RESEARCH": 1, "PASS": 0}
 INV_PATH = re.compile(r"^/api/inventory/(\d+)$")
+SELLER_PRODUCTS = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/products$")
 SELLER_PATH = re.compile(r"^/api/sellers/([A-Z0-9]{10,20})/(status|remove|pull)$")
 
 
@@ -398,6 +399,13 @@ def make_handler(db_path):
                     return self._send(200, {"items": checklist(conn), "location": db.get_setting(conn, "location")})
                 if url.path == "/api/sellers/found":
                     return self._send(200, db.found_sellers(conn))
+                spm = SELLER_PRODUCTS.match(url.path)
+                if spm:
+                    sid = spm.group(1)
+                    asins = [r[0] for r in conn.execute(
+                        """SELECT asin FROM sellers_seen WHERE seller_id = ?
+                           UNION SELECT asin FROM products WHERE origin LIKE ?""", (sid, f"%seller:{sid}%"))]
+                    return self._send(200, {"seller_id": sid, "asins": asins})
                 if url.path == "/api/sellers":
                     return self._send(200, sellers(conn))
                 if url.path == "/api/inventory":

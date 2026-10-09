@@ -7,7 +7,7 @@ import os
 import urllib.request
 
 from . import db, restrictions
-from .scoring import Config, score_product
+from .scoring import Config, looks_import, score_product
 from .sources import marketplace_links, retailer_links
 
 RANK = {"PASS": 0, "RESEARCH": 1, "BUY": 2}
@@ -216,7 +216,9 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "stores": stores[:8],
         "best_source": {"retailer": sig.best_source["retailer"], "price": sig.best_source.get("unit_cost"),
                         "verified": "size not stated" not in (sig.best_source.get("note") or "")} if sig.best_source else None,
-        "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores")} if enr else None,
+        "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores"),
+                       "brand_type": enr.get("brand_type"), "likely_retailers": enr.get("likely_retailers") or []} if enr else None,
+        "import_brand": looks_import(product["brand"], product["title"], enr),
         "eligibility": {"approval_url": el.get("approval_url"), "reason": el.get("reason"), "status": el.get("status")} if el else None,
     }
     view["priority"] = priority(view)

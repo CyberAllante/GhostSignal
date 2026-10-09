@@ -8,7 +8,34 @@ Tune the weights in WEIGHTS / thresholds in Config as you learn what actually se
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
+
+
+# Brands written in capitals that are real retail brands (so the knockoff check below leaves them alone).
+CAPS_OK = {"CRAYOLA", "DEWALT", "STANLEY", "HASBRO", "MATTEL", "PURINA", "CELSIUS", "NIVEA", "CETAPHIL", "SHARPIE",
+           "GREENIES", "MCCORMICK", "KIRKLAND", "RUBBERMAID", "PYREX", "FUNKO", "POKEMON", "BISSELL", "SCOTCH", "NERF",
+           "LEVOIT", "CRAFTSMAN", "RYOBI", "MAKITA", "BLACK+DECKER", "HUSKY", "COLEMAN", "IGLOO", "YETI", "STANLEY",
+           "OLAPLEX", "CERAVE", "NEUTROGENA", "REVLON", "MAYBELLINE", "GILLETTE", "COLGATE", "CREST", "TIDE", "LYSOL",
+           "CLOROX", "GLAD", "HEFTY", "ZIPLOC", "DIXIE", "BOUNTY", "CHARMIN", "DURACELL", "ENERGIZER", "SAMSUNG", "SONY"}
+
+
+def looks_import(brand: str | None, title: str | None, enr: dict | None = None) -> bool:
+    """Chinese private label / Amazon-first brand you can't walk into a store and buy. The AI's brand_type wins when
+    present; otherwise a few hard tells: no brand or 'Generic', 'for <Brand> ...' replacement parts, and invented
+    all-caps letter strings (SHISHUVIN, IEADEN)."""
+    bt = (enr or {}).get("brand_type")
+    if bt in ("national", "store_brand"):
+        return False
+    if bt in ("amazon_first", "generic_import"):
+        return True
+    b = (brand or "").strip()
+    if b.lower() in ("generic", "unbranded", "n/a"):      # a missing brand just means market data hasn't run yet
+        return True
+    t = (title or "").strip().lower()
+    if t.startswith(("for ", "compatible with", "replacement for")):
+        return True
+    return bool(re.fullmatch(r"[A-Z]{5,}", b)) and b not in CAPS_OK
 
 # Max points per component (sum = 100).
 WEIGHTS = {
@@ -255,11 +282,12 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
         flags.append("Brand known for IP complaints")
         penalty += 15
     resellers_only = str(product.get("store_note") or "").startswith("resellers_only")
-    amazon_only = (e.get("sold_in_stores") is False or resellers_only) and best is None
+    import_brand = looks_import(product.get("brand"), product.get("title"), e)
+    amazon_only = (e.get("sold_in_stores") is False or resellers_only or import_brand) and best is None
     if resellers_only:
         flags.append("Store check found only eBay/Mercari resellers: no retail store carries this")
     if amazon_only:
-        flags.append("No store sells this (Amazon-only brand) — nothing to buy for resale")
+        flags.append("No store sells this (Amazon-only or knockoff import brand): nothing to buy for resale")
         penalty += 25
     if e.get("replenishable"):
         reasons.append("Replenishable / repeat-purchase item")

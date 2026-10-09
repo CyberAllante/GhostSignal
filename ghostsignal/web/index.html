@@ -361,24 +361,35 @@ async function loadProducts(force) {
 const statCard = (c, ic, n, l, href) => `<a class="card stat" href="${href}"><div class="top"><span class="chip ${c}">${icon(ic)}</span><svg class="i" style="color:#d1d5db;width:16px"><use href="#i-arrow"/></svg></div><div class="n">${n}</div><div class="l">${l}</div></a>`;
 
 /* ---------- hot list: the playbook's filters, live ---------- */
-const HOT_RULES = "You can sell it (or one approval away) · real store brand, not Amazon-only · Amazon not selling it · 2+ sellers so the Buy Box rotates · sells for $18+ · ranked under 80,000";
+const HOT_RULES = "You can sell it (or one approval away) · real store brand, not Amazon-only or a knockoff import · Amazon not selling it · 2+ sellers so the Buy Box rotates · sells for $18+ · ranked under 80,000";
 function isLead(p) {
   const s = p.snapshot || {}, e = p.economics;
   return !p.restricted && (p.gated === "ungated" || p.gated === "approval")
-    && p.enrichment?.sold_in_stores !== false && !String(p.store_note || "").startsWith("resellers_only") && !s.amazon_price
+    && p.enrichment?.sold_in_stores !== false && !p.import_brand && !String(p.store_note || "").startsWith("resellers_only")
+    && !(searchedNoLuck(p) && !shelfOnly(p)) && !s.amazon_price
     && (s.offer_count || 0) >= 2 && (e.sale_price || 0) >= 18 && s.sales_rank && s.sales_rank <= 80000
     && (e.profit == null || e.profit > 0);      // a lead must make money at the best channel (or not be priced yet)
 }
+/* stores whose prices aren't online: a failed online search doesn't mean they don't carry it */
+const SHELF = ["traderjoes", "costco", "samsclub", "bjs", "wholefoods", "aldi"];
+const shelfOnly = (p) => (p.enrichment?.likely_retailers || []).some((r) => SHELF.includes(r)) || /trader joe|kirkland|member's mark/i.test(`${p.title} ${p.brand}`);
+const searchedNoLuck = (p) => /^(no_match_retail|nothing_found)/.test(p.store_note || "");
 function hotTiers(list) {
   const leads = list.filter(isLead).sort((a, b) => (a.snapshot.sales_rank) - (b.snapshot.sales_rank));
   const hasGap = (p) => p.best_source && p.economics.max_cost != null && p.best_source.price <= p.economics.max_cost
     && (p.best_source.price < p.economics.sale_price * 0.95);   // store price must actually leave room to profit
+  const verified = (p) => hasGap(p) && p.best_source.verified;
+  const signal = (p) => (p.new_sellers || 0) >= 1 || ((p.snapshot.offer_count || 0) <= 8 && (p.snapshot.fba_offers || 0) >= 1);
+  const byNew = (a, b) => (b.new_sellers || 0) - (a.new_sellers || 0) || a.snapshot.sales_rank - b.snapshot.sales_rank;
+  const ung = leads.filter((p) => p.gated === "ungated");
+  const shelf = ung.filter((p) => !hasGap(p) && (p.new_sellers || 0) >= 1 && p.enrichment?.sold_in_stores === true).sort(byNew);
   return {
-    diamonds: leads.filter((p) => p.gated === "ungated" && ((p.new_sellers || 0) >= 1 || ((p.snapshot.offer_count || 0) <= 8 && (p.snapshot.fba_offers || 0) >= 1)))
-      .sort((a, b) => (b.new_sellers || 0) - (a.new_sellers || 0) || a.snapshot.sales_rank - b.snapshot.sales_rank),
-    bangers: leads.filter((p) => p.gated === "ungated" && hasGap(p) && p.best_source.verified),
-    check: leads.filter((p) => p.gated === "ungated" && hasGap(p) && !p.best_source.verified),
-    leads: leads.filter((p) => p.gated === "ungated" && !hasGap(p)),
+    // a diamond needs a confirmed store price under your buy-under, plus proof it sells for someone like you
+    diamonds: ung.filter((p) => verified(p) && signal(p)).sort(byNew),
+    bangers: ung.filter((p) => verified(p) && !signal(p)),
+    check: ung.filter((p) => hasGap(p) && !p.best_source.verified),
+    shelf,
+    leads: ung.filter((p) => !hasGap(p) && !shelf.includes(p)),
     approval: leads.filter((p) => p.gated === "approval"),
   };
 }
@@ -405,16 +416,17 @@ async function pageHot() {
   await loadProducts();
   const t = hotTiers(products);
   const budget = await api("/api/stores/budget").catch(() => ({}));
-  $("#navHot").textContent = (t.bangers.length + t.check.length) || "";
+  $("#navHot").textContent = (t.diamonds.length + t.bangers.length + t.check.length) || "";
   const section = (title, sub, rows, empty) => `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
     <div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Sells</th><th class="num">Rank</th><th class="num">Sellers</th><th class="num">Buy under</th><th>Best store price</th><th class="num">Profit</th></tr></thead>
     <tbody>${rows.length ? rows.slice(0, 100).map(hotRow).join("") : `<tr><td colspan="7"><div class="empty">${empty}</div></td></tr>`}</tbody></table></div></div>`;
   if (!paint(seq, `
     <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.${budget.left != null ? ` <b>${budget.left} store searches left this month</b> (each Check stores uses 1 to 3).` : ""}</p></div>
       <div class="actions"><button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
-    ${section("💎 Diamonds", "You can sell it and a new (zero-feedback) seller already lists it, or it has 8 or fewer sellers with one FBA. Products listed by several new sellers come first.", t.diamonds, "No diamonds yet. Pull a new seller's storefront from the Sellers page.")}
-    ${section("🔥 Bangers", "Store price is under your max cost and the size is confirmed. Go buy.", t.bangers, "None yet. Store checks use your SerpAPI searches, so run Check stores on the leads below.")}
+    ${section("💎 Diamonds", "Go buy. A store has the same size under your buy-under price, you can sell it, and a new seller already lists it (or there are 8 or fewer sellers).", t.diamonds, "No diamonds yet. A diamond needs a confirmed store price, so run Check stores on the shelf-check list below.")}
+    ${section("🔥 Bangers", "Also a buy: confirmed store price under your buy-under, just more sellers on the listing.", t.bangers, "None yet.")}
     ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
+    ${section("🛒 New sellers are selling these", "Real store brands that a zero-feedback seller lists and you can sell. No store price confirmed yet, so not a buy: click Check stores, or check the shelf (Trader Joe's and Costco aren't online).", t.shelf, "None right now. Pull more sellers from the Sellers page.")}
     ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
     ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
   $("#main").querySelectorAll("[data-check]").forEach((btn) => (btn.onclick = (ev) => { ev.stopPropagation(); startPriceCheck(btn.dataset.check); }));
@@ -491,7 +503,7 @@ async function pageDashboard() {
   const [, demo, ung, st, hs] = await Promise.all([loadProducts(), api("/api/demo"), api("/api/ungate"), api("/api/refresh/status"), api("/api/holidays").catch(() => [])]);
   ungateData = ung;
   const t = hotTiers(products.filter((p) => !p.restricted));
-  const toCheck = [...t.check, ...t.leads].slice(0, 8);
+  const toCheck = [...t.check, ...t.shelf, ...t.leads].slice(0, 8);
   const approvals = [...ung.categories.map((g) => ({ ...g, kind: "categories" })), ...ung.brands.filter((g) => g.name !== "(brand unknown)").map((g) => ({ ...g, kind: "brands" }))]
     .filter((g) => g.tracking?.status !== "approved").sort((a, b) => b.strong - a.strong || b.products - a.products).slice(0, 6);
   const nextH = (hs || []).filter((h) => h.status !== "late").slice(0, 3);
@@ -503,7 +515,7 @@ async function pageDashboard() {
     <div class="page-head"><div><h1>Today</h1><p>${sellable} products you can sell · ${t.approval.length} one approval away · ${st.running ? "pulling fresh data now…" : `data updated ${ago(st.last_run)}`}</p></div>
       <div class="actions"><a class="btn" href="#/hot">Open Hot list</a><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
     ${step(1, "Buy", "A store has it under your max cost and the size is confirmed.",
-      t.bangers.length ? t.bangers.slice(0, 8).map((p) => prow(p, `<b class="pos">${money(p.best_source.price)} at ${esc(p.best_source.retailer)}</b>`)).join("")
+      (t.diamonds.length + t.bangers.length) ? [...t.diamonds, ...t.bangers].slice(0, 8).map((p) => prow(p, `<b class="pos">${money(p.best_source.price)} at ${esc(p.best_source.retailer)}</b>`)).join("")
         : `<div class="hint">Nothing confirmed yet. Store prices get checked automatically, about 10 products a day. Check step 2 meanwhile.</div>`)}
     ${step(2, "Check these", "You can sell them and they pass every filter. Look them up at Walmart, Target, Sam's or Costco: if the price is under \"buy under\", it's a buy.",
       toCheck.length ? toCheck.map((p) => prow(p, `<div style="text-align:right;white-space:nowrap"><div class="dim" style="font-size:11px">buy under</div><b>${money(p.economics.max_cost)}</b>${p.best_source ? `<div class="dim" style="font-size:11px">${esc(p.best_source.retailer)} ${money(p.best_source.price)}${p.best_source.verified ? "" : " (size?)"}</div>` : ""}</div>`)).join("")
@@ -744,12 +756,32 @@ async function pageUngate() {
   }));
 }
 
+async function openSeller(id) {
+  await loadProducts();
+  const r = await api(`/api/sellers/${id}/products`);
+  const set = new Set(r.asins), items = products.filter((p) => set.has(p.asin)).sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  const sellable = items.filter((p) => p.gated === "ungated").length;
+  const row = (p) => `<div class="mini-row" data-gasin="${p.asin}">${thumb(p)}<div style="flex:1;min-width:0"><div class="t">${esc(p.title || p.asin)}</div><div class="s">${sub(p)}</div></div>${gatedPill(p)}</div>`;
+  $("#drawer").innerHTML = `
+    <div class="dh"><button class="btn sm x" id="closeBtn" aria-label="Close">${icon("x")}</button>
+      <div class="dim" style="font-size:12px">Seller</div><h2>${esc(id)}</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill unknown">${items.length} products</span>${sellable ? `<span class="pill ungated">${sellable} you can sell</span>` : ""}
+        <a class="btn sm" href="https://www.amazon.com/s?me=${esc(id)}" target="_blank" rel="noopener">Storefront ↗</a>
+        <button class="btn sm" id="pullBtn">${icon("search")}Pull 3 pages</button></div></div>
+    <div class="db"><div class="sec">${items.length ? items.map(row).join("") : `<div class="hint">No products from this seller in your database yet. Pull their storefront.</div>`}</div>
+      ${r.asins.length > items.length ? `<div class="hint">${r.asins.length - items.length} more are archived or still loading.</div>` : ""}</div>`;
+  $("#closeBtn").onclick = closeDrawer;
+  $("#pullBtn").onclick = async () => { try { await api(`/api/sellers/${id}/pull`, { pages: 3 }); toast("Pulling their storefront. Products show up in a few minutes."); } catch (e) { toast(e.message); } };
+  $("#drawer").querySelectorAll("[data-gasin]").forEach((el) => (el.onclick = () => { drawerBack = () => openSeller(id); openDrawer(el.dataset.gasin); }));
+  $("#drawer").classList.add("open"); $("#scrim").classList.add("open"); $("#drawer").scrollTop = 0;
+}
+
 async function pageSellers() {
   const seq = routeSeq;
   const [list, groups, found] = await Promise.all([api("/api/sellers"), api("/api/seller-groups"), api("/api/sellers/found").catch(() => [])]);
   const foundCard = `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>New sellers spotted on your listings</h2><p>Third-party sellers Amazon shows on products you track, lowest feedback first. A zero-feedback seller is a new account like yours: what they list, you can likely sell. Pull a storefront to add their products (1 store search per 16 products).</p></div></div>
     ${found.length ? `<div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Feedback</th><th class="num">On your listings</th><th class="num">You can sell</th><th class="num">FBA</th><th>Examples</th><th class="num">Pulled</th><th></th></tr></thead>
-    <tbody>${found.map((r) => `<tr><td><a href="https://www.amazon.com/s?me=${esc(r.seller_id)}" target="_blank" rel="noopener"><b>${esc(r.seller_id)}</b> ↗</a></td>
+    <tbody>${found.map((r) => `<tr class="click" data-seller="${esc(r.seller_id)}"><td><b>${esc(r.seller_id)}</b> <a class="dim" href="https://www.amazon.com/s?me=${esc(r.seller_id)}" target="_blank" rel="noopener">↗</a></td>
       <td class="num"><b class="${(r.feedback || 0) === 0 ? "pos" : ""}">${r.feedback ?? "?"}</b>${r.positive != null ? ` <span class="dim">(${Math.round(r.positive)}%)</span>` : ""}</td>
       <td class="num">${r.listings}</td><td class="num pos">${r.sellable}</td><td class="num">${r.fba_listings}</td>
       <td class="dim" style="max-width:300px;font-size:12px">${(r.examples || []).map((x) => esc(x.slice(0, 45))).join(" · ")}</td>
@@ -758,8 +790,8 @@ async function pageSellers() {
     : `<div class="card-b"><div class="hint">No sellers recorded yet. Sellers are captured every time market data is pulled; refresh data to start.</div></div>`}</div>`;
   $("#navSellers").textContent = list.length || "";
   const active = list.filter((s) => s.status === "active").length;
-  const groupCard = groups.length ? `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>From your imports</h2><p>Sellers whose products came in with a seller column. Diamonds = you can sell it, 8 or fewer sellers, one FBA seller, not sold by Amazon.</p></div></div>
-    <div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Products</th><th class="num">You can sell</th><th class="num">Diamonds</th><th class="num">Amazon sells</th></tr></thead>
+  const groupCard = groups.length ? `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>From your imports</h2><p>Sellers whose products came in with a seller column. Low competition = you can sell it, 8 or fewer sellers, one FBA seller, not sold by Amazon.</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Seller</th><th class="num">Products</th><th class="num">You can sell</th><th class="num">Low competition</th><th class="num">Amazon sells</th></tr></thead>
     <tbody>${groups.map((g) => `<tr><td><b>${esc(g.seller)}</b></td><td class="num">${g.products}</td><td class="num">${g.sellable}</td><td class="num pos"><b>${g.diamonds}</b></td><td class="num">${g.amazon_sold}</td></tr>`).join("")}</tbody></table></div></div>` : "";
   if (!paint(seq, `${foundCard}${groupCard}
     <div class="page-head"><div><h1>Tracked sellers</h1><p>Storefronts you're watching. Their products land in Products automatically.</p></div>
@@ -771,7 +803,7 @@ async function pageSellers() {
     </div>
     <div class="card">
       <div class="table-wrap"><table><thead><tr><th>Storefront</th><th>Status</th><th>Added</th><th>Last pulled</th><th class="num">Products</th><th class="num">New</th><th class="num">Buys</th><th></th></tr></thead>
-      <tbody>${list.length ? list.map((s) => `<tr>
+      <tbody>${list.length ? list.map((s) => `<tr class="click" data-seller="${esc(s.seller_id)}">
         <td><div style="font-weight:500">${esc(s.name || s.seller_id)}</div><div style="font-size:12px"><a class="dim" href="https://www.amazon.com/sp?seller=${s.seller_id}" target="_blank" rel="noopener">${s.seller_id} ↗</a></div></td>
         <td><span class="pill ${s.status}">${cap(s.status)}</span></td>
         <td>${new Date(s.added_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</td>
@@ -782,8 +814,9 @@ async function pageSellers() {
         <td class="num"><button class="btn sm" data-sid="${s.seller_id}" data-act="${s.status === "active" ? "paused" : "active"}">${s.status === "active" ? "Pause" : "Resume"}</button>
           <button class="btn sm" data-sid="${s.seller_id}" data-act="remove">Remove</button></td></tr>`).join("")
         : `<tr><td colspan="8"><div class="empty">No sellers yet. On any Amazon listing, click a seller's name, copy that page's link, then click <b>Add seller</b>.</div></td></tr>`}</tbody></table></div>
-      <div class="tfoot"><span>Pulling a seller's products needs a Keepa key (see Setup). Sellers you add now get pulled once it's connected.</span></div>
+      <div class="tfoot"><span>Click a seller to see their products. Pull 3 pages adds their storefront (1 store search per 16 products).</span></div>
     </div>`)) return;
+  $("#main").querySelectorAll("tr[data-seller]").forEach((tr) => (tr.onclick = (e) => { if (e.target.closest("a,button")) return; openSeller(tr.dataset.seller); }));
   $("#main").querySelectorAll("button[data-sid]").forEach((b) => (b.onclick = async () => {
     if (b.dataset.act === "remove") await api(`/api/sellers/${b.dataset.sid}/remove`, {});
     else await api(`/api/sellers/${b.dataset.sid}/status`, { status: b.dataset.act });

@@ -32,10 +32,11 @@ ITEM_SCHEMA = {
         "likely_retailers": {"type": "array", "items": {"type": "string"}},
         "bundle_or_multipack": {"type": "boolean"},
         "sold_in_stores": {"type": "boolean"},
+        "brand_type": {"type": "string", "enum": ["national", "store_brand", "amazon_first", "generic_import"]},
         "notes": {"type": "string"},
     },
     "required": ["asin", "product_type", "replenishable", "gating_risk", "hazmat_risk",
-                 "ip_complaint_risk", "expiration_dated", "likely_retailers", "bundle_or_multipack", "sold_in_stores", "notes"],
+                 "ip_complaint_risk", "expiration_dated", "likely_retailers", "bundle_or_multipack", "sold_in_stores", "brand_type", "notes"],
     "additionalProperties": False,
 }
 
@@ -55,10 +56,17 @@ For each product, judge from the title, brand and category:
 - expiration_dated: Amazon requires expiration-date handling (food, supplements, cosmetics).
 - likely_retailers: US physical/online stores most likely to stock it, as short keys from:
   walmart, target, costco, samsclub, homedepot, lowes, bestbuy, cvs, walgreens, traderjoes, wholefoods, kohls, dollartree.
-- sold_in_stores: true if this brand/product is a real brand that physical or major online retailers (Walmart, Target,
-  Costco, Home Depot, Best Buy, CVS, grocery chains...) commonly stock. FALSE for brands that look Amazon-only:
-  invented or unfamiliar names on generic factory-made goods (apparel, phone cases, gadgets, home accessories),
-  private-label brands sold mainly through Amazon, or items with no recognisable retail presence. When unsure, use true.
+- brand_type: who makes it and where it is sold.
+  national = a real brand big US chains stock on the shelf (Hershey's, Crayola, Dove, OXO, Hasbro, Bobbie).
+  store_brand = a retailer's own label (Kirkland, Great Value, Equate, Spring Valley, ReliOn, Mainstays, Trader Joe's, Up&Up).
+  amazon_first = a brand that sells mainly on Amazon even if it shows up on Walmart.com's marketplace
+  (Utopia Bedding, USX Mount, AUVON, Amazon Basics, most brands you only know from Amazon search results).
+  generic_import = invented or unfamiliar names on factory-made goods, usually Chinese private label: random
+  letter-string brands (SHISHUVIN, IEADEN, Trgowaul, MISSLO, Outus, tuunio), "Generic", or titles like
+  "for Milwaukee ..." / "compatible with ..." replacement parts.
+  When unsure between national and amazon_first, choose amazon_first: a false "national" sends the buyer to a store
+  that doesn't carry it.
+- sold_in_stores: true only when brand_type is national or store_brand.
   likely_retailers must be [] whenever sold_in_stores is false.
 - bundle_or_multipack: the Amazon listing is a multi-pack or bundle of a single retail unit.
 - notes: one short sentence on the biggest risk or sourcing tip.
@@ -129,6 +137,8 @@ def enrich(conn, asins: list[str] | None = None, force: bool = False) -> int:
             continue
         for item in results:
             if item.get("asin") in asins:
+                if item.get("brand_type"):
+                    item["sold_in_stores"] = item["brand_type"] in ("national", "store_brand")
                 if item.get("sold_in_stores") is False:
                     item["likely_retailers"] = []
                 conn.execute(
