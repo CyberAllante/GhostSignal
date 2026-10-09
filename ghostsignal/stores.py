@@ -206,13 +206,24 @@ def classify_results(results: list[dict]) -> str:
     return "resellers" if reseller >= 3 else "nothing"
 
 
-def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) -> list[dict]:
-    """Cheapest close match per store."""
+def _brand_words(brand: str | None) -> set[str]:
+    return {w for w in _words(brand or "") if len(w) > 2 and w not in _STOP}
+
+
+def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5, brand: str | None = None) -> list[dict]:
+    """Cheapest close match per store. A short generic title ("Classroom Calendar Days of the Year") matches any
+    store item with those words, so it can't be matched by title at all; and when the brand is known, the store
+    listing has to name it (a $10 no-name poster is not the brand's boxed card set)."""
+    if len({w for w in _words(amazon_title) if w not in _STOP and len(w) > 2}) < 5:
+        return []
+    bw = _brand_words(brand) - {"generic"}
     best: dict[str, dict] = {}
     for r in results:
         key = store_key(r.get("source", ""))
         price = r.get("extracted_price")
         if not key or key not in RETAILERS_OK or not isinstance(price, (int, float)):
+            continue
+        if bw and not (bw & _words(r.get("title", ""))):
             continue
         match = similarity(amazon_title, r.get("title", ""))
         # Lens already matched the photo, so its (often shorter) store titles need less word overlap.
@@ -272,18 +283,18 @@ def find_prices(conn, asins: list[str], budget: int | None = None) -> dict:
     for asin in asins:
         if used >= budget:
             break
-        p = conn.execute("SELECT title, upc, image_url FROM products WHERE asin = ?", (asin,)).fetchone()
+        p = conn.execute("SELECT title, brand, upc, image_url FROM products WHERE asin = ?", (asin,)).fetchone()
         if not p or not p["title"]:
             continue
         # Title search is fast (~1s); barcode search can take 30s+, so it's the fallback, then the photo search.
         raw = _safe(search, search_query(p["title"]), location); used += 1
-        offers = pick_offers(raw, p["title"])
+        offers = pick_offers(raw, p["title"], brand=p["brand"])
         if not offers and p["upc"] and used < budget:
             more = _safe(search, search_query(p["title"], p["upc"]), location); used += 1
-            raw += more; offers = pick_offers(more, p["title"])
+            raw += more; offers = pick_offers(more, p["title"], brand=p["brand"])
         if not offers and p["image_url"] and used < budget:
             more = _safe(search_lens, p["image_url"]); used += 1
-            raw += more; offers = pick_offers(more, p["title"])
+            raw += more; offers = pick_offers(more, p["title"], brand=p["brand"])
         searched += 1
         kind = classify_results(raw)
         note = ("matched" if offers else

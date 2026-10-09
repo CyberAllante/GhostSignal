@@ -696,3 +696,13 @@ def test_barcode_price_for_a_different_size_is_dropped():
     assert upcdb.offers_for(item, "Peet's Coffee Ground Coffee Dark Roast, 63 Ounces") == []
     item["title"] = "Peet's Coffee Major Dickason's Ground"            # size unknown: kept, but flagged
     assert upcdb.offers_for(item, "Peet's Coffee Ground Coffee Dark Roast, 63 Ounces")[0]["size_ok"] is False
+
+
+def test_store_match_needs_a_specific_title_and_the_brand():
+    from ghostsignal import stores
+    poster = [{"source": "Walmart", "extracted_price": 10.58, "title": "Classroom Calendar Poster Canvas Days of the Year Months Chart"}]
+    assert stores.pick_offers(poster, "Classroom Calendar Days of the Year") == []          # too generic to match
+    jar = [{"source": "Walmart", "extracted_price": 5.0, "title": "Great Value Peanut Butter Creamy 40 oz Jar"}]
+    assert stores.pick_offers(jar, "Jif Creamy Peanut Butter 40 oz Jar Spread", brand="Jif") == []   # other brand
+    jif = [{"source": "Walmart", "extracted_price": 5.0, "title": "Jif Creamy Peanut Butter Spread 40 oz Jar"}]
+    assert stores.pick_offers(jif, "Jif Creamy Peanut Butter 40 oz Jar Spread", brand="Jif")
