@@ -382,7 +382,7 @@ function hotTiers(list) {
   const signal = (p) => (p.new_sellers || 0) >= 1 || ((p.snapshot.offer_count || 0) <= 8 && (p.snapshot.fba_offers || 0) >= 1);
   const byNew = (a, b) => (b.new_sellers || 0) - (a.new_sellers || 0) || a.snapshot.sales_rank - b.snapshot.sales_rank;
   const ung = leads.filter((p) => p.gated === "ungated");
-  const shelf = ung.filter((p) => !hasGap(p) && (p.new_sellers || 0) >= 1 && p.enrichment?.sold_in_stores === true).sort(byNew);
+  const shelf = ung.filter((p) => !hasGap(p) && (p.new_sellers || 0) >= 1).sort(byNew);   // leads already exclude knockoff and Amazon-only brands
   return {
     // a diamond needs a confirmed store price under your buy-under, plus proof it sells for someone like you
     diamonds: ung.filter((p) => verified(p) && signal(p)).sort(byNew),
