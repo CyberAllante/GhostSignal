@@ -706,3 +706,11 @@ def test_store_match_needs_a_specific_title_and_the_brand():
     assert stores.pick_offers(jar, "Jif Creamy Peanut Butter 40 oz Jar Spread", brand="Jif") == []   # other brand
     jif = [{"source": "Walmart", "extracted_price": 5.0, "title": "Jif Creamy Peanut Butter Spread 40 oz Jar"}]
     assert stores.pick_offers(jif, "Jif Creamy Peanut Butter 40 oz Jar Spread", brand="Jif")
+
+
+def test_brand_check_ignores_apostrophes_and_short_branded_titles_pass():
+    from ghostsignal import stores
+    peets = [{"source": "Walmart", "extracted_price": 9.0, "title": "Peets Coffee Major Dickason's Blend Whole Bean 32oz"}]
+    assert stores.pick_offers(peets, "Peet's Coffee Major Dickason's Blend Whole Bean Coffee 32 oz", brand="Peet's Coffee")
+    wax = [{"source": "Walmart", "extracted_price": 9.0, "title": "Renaissance Wax Polish 200 ml"}]
+    assert stores.pick_offers(wax, "Renaissance Wax Polish, 200 ml", brand="Renaissance")

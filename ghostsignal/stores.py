@@ -206,24 +206,29 @@ def classify_results(results: list[dict]) -> str:
     return "resellers" if reseller >= 3 else "nothing"
 
 
+def _stem(text: str) -> set[str]:
+    """Words with apostrophes and a plural/possessive s dropped: Peet's = Peets = Peet, Hershey's = Hershey."""
+    return {re.sub(r"s$", "", w) for w in _words((text or "").replace("'", "").replace("’", ""))}
+
+
 def _brand_words(brand: str | None) -> set[str]:
-    return {w for w in _words(brand or "") if len(w) > 2 and w not in _STOP}
+    return {w for w in _stem(brand or "") if len(w) > 2 and w not in _STOP}
 
 
 def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5, brand: str | None = None) -> list[dict]:
     """Cheapest close match per store. A short generic title ("Classroom Calendar Days of the Year") matches any
     store item with those words, so it can't be matched by title at all; and when the brand is known, the store
     listing has to name it (a $10 no-name poster is not the brand's boxed card set)."""
-    if len({w for w in _words(amazon_title) if w not in _STOP and len(w) > 2}) < 5:
-        return []
     bw = _brand_words(brand) - {"generic"}
+    if not bw and len({w for w in _words(amazon_title) if w not in _STOP and len(w) > 2}) < 5:
+        return []
     best: dict[str, dict] = {}
     for r in results:
         key = store_key(r.get("source", ""))
         price = r.get("extracted_price")
         if not key or key not in RETAILERS_OK or not isinstance(price, (int, float)):
             continue
-        if bw and not (bw & _words(r.get("title", ""))):
+        if bw and not (bw & _stem(r.get("title", ""))):
             continue
         match = similarity(amazon_title, r.get("title", ""))
         # Lens already matched the photo, so its (often shorter) store titles need less word overlap.
