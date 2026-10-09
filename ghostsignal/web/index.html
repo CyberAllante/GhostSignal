@@ -419,7 +419,7 @@ function hotRow(p) {
     <td class="prod"><div class="prodcell">${thumb(p)}<div><div class="t">${esc(p.title || p.asin)}</div><div class="a">${esc(p.brand || "")}${p.brand ? " · " : ""}${esc(p.category || "")}${p.new_sellers ? ` · <b class="pos">listed by ${p.new_sellers} new seller${p.new_sellers > 1 ? "s" : ""}</b>` : ""}</div>${storeChips(p)}</div></div></td>
     <td class="num">${money(e.sale_price)}</td><td class="num">#${num(s.sales_rank)}</td><td class="num">${s.offer_count ?? "—"}${s.fba_offers != null ? ` <span class="dim">(${s.fba_offers} FBA)</span>` : ""}</td>
     <td class="num"><b>${money(e.max_cost)}</b>${e.fbm?.max_cost != null ? `<div class="dim" style="font-size:11px">FBM ${money(e.fbm.max_cost)}</div>` : ""}</td>
-    <td>${store}</td><td class="num ${cls(e.profit)}">${e.profit != null ? money(e.profit) : "—"}</td></tr>`;
+    <td>${store}</td><td class="num ${cls(e.profit)}">${e.profit != null ? money(e.profit) + (b && !b.verified ? `<div class="dim" style="font-size:11px">if same size</div>` : "") : "—"}</td></tr>`;
 }
 function brandCard(brands) {
   if (!brands.length) return "";
@@ -515,8 +515,8 @@ const sub = (p) => {
   const e = p.economics, s = p.snapshot || {}, bits = [];
   if (e.sale_price) bits.push(`Sells ${money(e.sale_price)}`);
   if (s.sales_rank) bits.push(`#${num(s.sales_rank)} rank`);
-  if (s.offer_count != null) bits.push(`${s.offer_count} sellers`);
-  if (e.cost) bits.push(`${money(e.profit)} profit`); else if (e.max_cost) bits.push(`buy under ${money(e.max_cost)}`);
+  if (s.offer_count != null) bits.push(s.offer_count === 1 ? `1 seller (check it isn't the brand's own listing)` : `${s.offer_count} sellers`);
+  if (e.cost) bits.push(p.best_source && !p.best_source.verified ? `${money(e.profit)} profit if same size` : `${money(e.profit)} profit`); else if (e.max_cost) bits.push(`buy under ${money(e.max_cost)}`);
   return bits.join(" · ") || "No market data yet";
 };
 
