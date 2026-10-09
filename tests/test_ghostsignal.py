@@ -664,6 +664,7 @@ def test_knockoff_brands_are_not_sourceable():
     assert looks_import("Generic", "Phone case")
     assert looks_import("Trgowaul", "Rack", {"brand_type": "generic_import"})
     assert looks_import("Utopia Bedding", "Pillow", {"brand_type": "amazon_first"})
+    assert looks_import("USX MOUNT", "TV Wall Mount", {"sold_in_stores": True})     # old lenient AI verdict
     assert not looks_import("CRAYOLA", "Colored Pencils")
     assert not looks_import("Hershey's", "Variety pack")
     assert not looks_import("SHISHUVIN", "x", {"brand_type": "national"})   # the AI's call wins

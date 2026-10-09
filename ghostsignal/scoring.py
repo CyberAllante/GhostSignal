@@ -20,6 +20,12 @@ CAPS_OK = {"CRAYOLA", "DEWALT", "STANLEY", "HASBRO", "MATTEL", "PURINA", "CELSIU
            "CLOROX", "GLAD", "HEFTY", "ZIPLOC", "DIXIE", "BOUNTY", "CHARMIN", "DURACELL", "ENERGIZER", "SAMSUNG", "SONY"}
 
 
+# Brands that sell mainly on Amazon (Walmart.com hits for them are marketplace resellers, not the store).
+AMAZON_FIRST = {"utopia bedding", "utopia kitchen", "utopia towels", "usx mount", "auvon", "amazon basics", "amazonbasics",
+                "amazon essentials", "solimo", "happy belly", "presto!", "mountup", "pipishell", "mounting dream",
+                "beckham hotel collection", "bedsure", "amazon commercial", "wag", "goodthreads"}
+
+
 def looks_import(brand: str | None, title: str | None, enr: dict | None = None) -> bool:
     """Chinese private label / Amazon-first brand you can't walk into a store and buy. The AI's brand_type wins when
     present; otherwise a few hard tells: no brand or 'Generic', 'for <Brand> ...' replacement parts, and invented
@@ -30,6 +36,8 @@ def looks_import(brand: str | None, title: str | None, enr: dict | None = None) 
     if bt in ("amazon_first", "generic_import"):
         return True
     b = (brand or "").strip()
+    if b.lower() in AMAZON_FIRST:
+        return True
     if b.lower() in ("generic", "unbranded", "n/a"):      # a missing brand just means market data hasn't run yet
         return True
     t = (title or "").strip().lower()
