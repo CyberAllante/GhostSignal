@@ -119,6 +119,8 @@ _COUNT = {"ct", "count", "pk", "pack", "packs", "pcs", "pieces", "roll", "rolls"
 def sizes(title: str) -> dict:
     """{'oz': total weight in oz, 'ml': volume, 'count': biggest count} pulled from a product title."""
     out: dict = {}
+    for num in re.findall(r"\b(?:pack|set|case|box|bundle)\s+of\s+(\d+)\b", (title or "").lower()):
+        out["count"] = max(out.get("count", 0), float(num))          # "Pack of 2": the number comes after the word
     for num, unit in _SIZE.findall((title or "").lower().replace("fl. oz", "floz")):
         n, u = float(num), re.sub(r"[\s.]", "", unit)
         if u.startswith("floz") or u in ("ml", "l", "liter", "liters"):
@@ -130,15 +132,31 @@ def sizes(title: str) -> dict:
     return out
 
 
-def same_size(a: str, b: str) -> bool | None:
-    """True/False when both titles state a comparable size; None when we can't tell."""
-    sa, sb = sizes(a), sizes(b)
+def total_size(s: dict) -> dict:
+    """Compare what you actually get: 2.75 lb x pack of 2 = 88 oz total; a single 22 oz jar is not the same thing."""
+    t = {}
+    if "oz" in s:
+        t["oz"] = s["oz"] * s.get("count", 1)
+    if "ml" in s:
+        t["ml"] = s["ml"] * s.get("count", 1)
+    if "count" in s and "oz" not in s and "ml" not in s:
+        t["count"] = s["count"]
+    return t
+
+
+def same_size(a: str, b: str, b_url: str = "") -> bool | None:
+    """True/False when both listings state a comparable size; None when we can't tell. The store's size is often
+    only in its URL slug (…/Raw-Honey-22-oz-…), so that counts too."""
+    sb_src = b + " " + re.sub(r"[-_/]+", " ", (b_url or "").split("?")[0].rsplit("/", 2)[-2] if (b_url or "").count("/") > 3 else "")
+    sa, sb = total_size(sizes(a)), total_size(sizes(sb_src))
     verdict = None
     for k in ("oz", "ml", "count"):
         if k in sa and k in sb:
             if abs(sa[k] - sb[k]) / max(sa[k], sb[k]) > 0.04:
                 return False
             verdict = True
+    if "oz" in sa and "oz" not in sb and "count" in sb and "count" not in sizes(a):
+        return False         # store lists a count (e.g. 12 ct) for a product Amazon sells by weight: different thing
     return verdict
 
 
@@ -200,7 +218,7 @@ def pick_offers(results: list[dict], amazon_title: str, min_match: float = 0.5) 
         # Lens already matched the photo, so its (often shorter) store titles need less word overlap.
         if match < (0.3 if r.get("via") == "lens" else min_match):
             continue
-        size_ok = same_size(amazon_title, r.get("title", ""))
+        size_ok = same_size(amazon_title, r.get("title", ""), r.get("link") or r.get("product_link") or "")
         if size_ok is False:          # a different pack size is never a match
             continue
         if size_ok is True:           # size confirmed: needs most of the product words to match

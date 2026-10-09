@@ -207,6 +207,7 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "asin": asin, "title": product["title"], "brand": product["brand"], "category": product["category"],
         "image_url": product["image_url"], "status": product["status"], "origin": product["origin"],
         "store_note": product["store_note"],
+        "new_sellers": sum(1 for o in (product["origin"] or "").split(",") if o.startswith("seller:")),
         "verdict": sig.verdict, "score": sig.score, "gated": sig.gated, "restricted": sig.restricted,
         "economics": {k: getattr(e, k, None) for k in ("sale_price", "cost", "max_cost", "profit", "roi", "best_channel",
                                                          "referral_fee", "fba_fee", "fbm")},

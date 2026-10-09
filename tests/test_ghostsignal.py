@@ -645,3 +645,14 @@ def test_migration_columns_survive_reopen(tmp_path):
     raw = sqlite3.connect(path)
     cols = {r[1] for r in raw.execute("PRAGMA table_info(products)")}
     assert {"weight_lb", "store_note"} <= cols            # the added columns must be committed, not rolled back
+
+
+def test_pack_totals_and_url_sizes():
+    from ghostsignal.stores import same_size, pick_offers
+    A = "Y.S Eco Bee Farms Raw Honey, 2.75 Pounds (Pack of 2)"
+    assert same_size(A, "Y.S. Eco Bee Farms Raw Honey, Unfiltered", "https://www.walmart.com/ip/Y-S-Eco-Bee-Farms-Raw-Honey-22-oz-Paste/177851669") is False
+    assert same_size(A, "YS Eco Bee Farms Raw Honey 2.75 lb 2 pack") is True
+    assert same_size("Peet's Coffee 12 oz 2 Pack", "Peet's Coffee 12 oz") is False       # single bag vs a 2-pack
+    assert same_size("Peet's Coffee 12 oz 2 Pack", "Peet's Coffee 24 oz total") is True
+    res = [{"source": "Walmart", "extracted_price": 15.0, "title": "Y.S. Eco Bee Farms Raw Honey, Unfiltered, Unpasteurized", "link": "https://www.walmart.com/ip/Y-S-Eco-Bee-Farms-Raw-Honey-22-oz-Paste/177851669"}]
+    assert pick_offers(res, A) == []
