@@ -16,7 +16,7 @@ def call(path, body=None):
         return json.loads(r.read())
 
 
-def lookup(upc):
+def lookup(upc, tries=3):
     req = urllib.request.Request("https://api.upcitemdb.com/prod/trial/lookup?upc=" + upc,
                                  headers={"User-Agent": "GhostSignal/1.0", "Accept": "application/json"})
     try:
@@ -24,7 +24,11 @@ def lookup(upc):
             return json.loads(r.read()).get("items") or [], r.headers.get("X-RateLimit-Remaining")
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            return None, "0"
+            wait = float(e.headers.get("Retry-After") or 60)
+            if e.headers.get("X-RateLimit-Limit") == "100" or wait > 600 or tries <= 1:
+                return None, "0"                 # the daily 100 is used up
+            time.sleep(wait + 1)                 # the 6-a-minute burst limit: wait it out
+            return lookup(upc, tries - 1)
         if e.code in (400, 404):
             return [], None
         raise
@@ -39,7 +43,7 @@ for row in due:
     results.append({"asin": row["asin"], "items": items}); done += 1
     if len(results) >= 10:
         print(call("/api/upcdb/results", {"results": results})); results = []
-    time.sleep(2)
+    time.sleep(10.5)                     # 6 lookups a minute
 if results:
     print(call("/api/upcdb/results", {"results": results}))
 print(f"looked up {done} of {len(due)}")
