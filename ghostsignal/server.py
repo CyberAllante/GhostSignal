@@ -399,6 +399,12 @@ def make_handler(db_path):
                     return self._send(200, {"items": checklist(conn), "location": db.get_setting(conn, "location")})
                 if url.path == "/api/sellers/found":
                     return self._send(200, db.found_sellers(conn))
+                if url.path == "/api/upcdb/due":
+                    from . import upcdb
+                    asins = upcdb.due(conn, int((parse_qs(url.query).get("limit") or ["95"])[0]))
+                    rows = [dict(r) for r in conn.execute(
+                        f"SELECT asin, upc FROM products WHERE asin IN ({','.join('?' * len(asins))})", asins)] if asins else []
+                    return self._send(200, rows)
                 spm = SELLER_PRODUCTS.match(url.path)
                 if spm:
                     sid = spm.group(1)
@@ -713,6 +719,11 @@ def make_handler(db_path):
                 if url.path == "/api/demo/clear":
                     from .demo import clear_demo
                     return self._send(200, {"removed": clear_demo(conn)})
+                if url.path == "/api/upcdb/results":       # lookups done on a home computer (cloud IPs are rate-limited)
+                    from . import upcdb
+                    saved = sum(upcdb.save(conn, r["asin"], r.get("items") or []) for r in body.get("results") or [])
+                    _invalidate_lists([r["asin"] for r in body.get("results") or []])
+                    return self._send(200, {"saved": saved})
                 if url.path == "/api/holidays/pull":
                     from . import holidays
                     kws = holidays.keywords_for(body.get("name") or "")

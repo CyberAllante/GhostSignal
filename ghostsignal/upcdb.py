@@ -100,6 +100,24 @@ def due(conn, limit: int = DAILY, days: float = 21) -> list[str]:
     return [a for *_, a in sorted(picks, reverse=True)[:limit]]
 
 
+def save(conn, asin: str, items: list[dict]) -> int:
+    """Store the offers from one lookup (run here, or on a home computer that sends its results in)."""
+    p = conn.execute("SELECT title FROM products WHERE asin = ?", (asin,)).fetchone()
+    if not p:
+        return 0
+    saved = 0
+    conn.execute("DELETE FROM retail_sources WHERE asin = ? AND note LIKE 'barcode%'", (asin,))
+    for item in (items or [])[:1]:
+        for o in offers_for(item, p["title"])[:6]:
+            db.add_source(conn, asin, o["retailer"], o["price"], pack_qty=o["pack_qty"], url=o["url"],
+                          note=f"barcode match · same size · price from {o['seen']}, may be old"
+                               + (f" · buy {o['pack_qty']}" if o["pack_qty"] > 1 else "") + f": {o['title'][:100]}")
+            saved += 1
+    db.set_setting(conn, f"upc_checked:{asin}", db.now())
+    conn.commit()
+    return saved
+
+
 def find_prices(conn, asins: list[str] | None = None, limit: int | None = None) -> dict:
     budget = max(0, (limit or DAILY) - _used_today(conn))
     asins = (asins if asins is not None else due(conn, budget))[:budget]
@@ -117,15 +135,7 @@ def find_prices(conn, asins: list[str] | None = None, limit: int | None = None) 
             continue
         looked += 1
         _mark_used(conn, 1)
-        conn.execute("DELETE FROM retail_sources WHERE asin = ? AND note LIKE 'barcode%'", (asin,))
-        for item in items[:1]:
-            for o in offers_for(item, p["title"])[:6]:
-                db.add_source(conn, asin, o["retailer"], o["price"], pack_qty=o["pack_qty"], url=o["url"],
-                              note=f"barcode match · same size · price from {o['seen']}, may be old"
-                                   + (f" · buy {o['pack_qty']}" if o["pack_qty"] > 1 else "") + f": {o['title'][:100]}")
-                saved += 1
-        db.set_setting(conn, f"upc_checked:{asin}", db.now())
-        conn.commit()
+        saved += save(conn, asin, items)
         if left is not None and left <= 100 - DAILY:
             break
         time.sleep(1.2)                    # the trial allows about 6 requests a minute in bursts
