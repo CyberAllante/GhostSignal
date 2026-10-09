@@ -686,3 +686,13 @@ def test_barcode_offers_keep_recent_real_stores_and_scale_multipacks():
     from ghostsignal.engine import _verified
     assert not _verified("barcode match · same size · price from 2026-10-01, may be old")
     assert _verified("shopping · 90% match · same size: x")
+
+
+def test_barcode_price_for_a_different_size_is_dropped():
+    import time
+    from ghostsignal import upcdb
+    item = {"title": "Peet's Coffee Major Dickason's Ground 18 oz", "offers": [
+        {"merchant": "Target", "price": 12.49, "updated_t": time.time(), "condition": "New"}]}
+    assert upcdb.offers_for(item, "Peet's Coffee Ground Coffee Dark Roast, 63 Ounces") == []
+    item["title"] = "Peet's Coffee Major Dickason's Ground"            # size unknown: kept, but flagged
+    assert upcdb.offers_for(item, "Peet's Coffee Ground Coffee Dark Roast, 63 Ounces")[0]["size_ok"] is False

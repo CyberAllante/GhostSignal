@@ -53,6 +53,13 @@ def offers_for(item: dict, amazon_title: str, max_age_days: int = MAX_AGE_DAYS) 
     pa, pu = _pack(amazon_title), _pack(item.get("title") or "")
     if pa > pu and pa % pu == 0:          # Amazon multipack carrying the single unit's barcode
         qty = pa // pu
+    item_desc = " ".join(str(item.get(k) or "") for k in ("title", "size"))
+    if qty == 1:
+        size_ok = stores.same_size(amazon_title, item_desc)
+        if size_ok is False:              # barcode reused on a bigger/smaller listing: the price is for something else
+            return []
+    else:
+        size_ok = None
     best: dict[str, dict] = {}
     for o in item.get("offers") or []:
         key = stores.store_key(o.get("merchant") or "")
@@ -63,7 +70,8 @@ def offers_for(item: dict, amazon_title: str, max_age_days: int = MAX_AGE_DAYS) 
             continue
         if key not in best or price < best[key]["price"]:
             best[key] = {"retailer": key, "price": float(price), "pack_qty": qty, "url": o.get("link") or "",
-                         "seen": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(), "title": item.get("title") or ""}
+                         "seen": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(), "title": item.get("title") or "",
+                         "size_ok": bool(size_ok)}
     return sorted(best.values(), key=lambda x: x["price"] * x["pack_qty"])
 
 
@@ -110,7 +118,7 @@ def save(conn, asin: str, items: list[dict]) -> int:
     for item in (items or [])[:1]:
         for o in offers_for(item, p["title"])[:6]:
             db.add_source(conn, asin, o["retailer"], o["price"], pack_qty=o["pack_qty"], url=o["url"],
-                          note=f"barcode match · same size · price from {o['seen']}, may be old"
+                          note=f"barcode match · {'same size' if o['size_ok'] else 'size not stated, check it'} · price from {o['seen']}, may be old"
                                + (f" · buy {o['pack_qty']}" if o["pack_qty"] > 1 else "") + f": {o['title'][:100]}")
             saved += 1
     db.set_setting(conn, f"upc_checked:{asin}", db.now())
