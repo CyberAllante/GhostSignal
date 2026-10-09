@@ -183,6 +183,8 @@ def run_pipeline(conn, stale_days: float | None = None, max_prices: int = 8):
     # Optional extras: a failure here must never stop scoring and alerts below.
     if stores.configured():
         _step("store prices", lambda: stores.find_prices(conn, stores.due_for_check(conn, max_prices)))
+        from . import upcdb
+        _step("barcode store prices", lambda: upcdb.find_prices(conn))
     if os.environ.get("ANTHROPIC_API_KEY"):
         from . import enrich
         _step("enriched", lambda: enrich.enrich(conn))

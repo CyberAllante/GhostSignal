@@ -193,13 +193,19 @@ def priority(view: dict) -> int:
     return _GATE_RANK.get(view.get("gated"), 2) * 1000 + _VERDICT_RANK.get(view.get("verdict"), 0) * 100 + (view.get("score") or 0)
 
 
+def _verified(note: str | None) -> bool:
+    """A store price you can act on: same size confirmed and not an old barcode-database price."""
+    n = note or ""
+    return "size not stated" not in n and "may be old" not in n
+
+
 def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
     """The slim version of product_view for lists and tables (about a tenth of the size)."""
     product, snap, sources, orders, sig = evaluate(conn, asin, cfg)
     e = sig.economics
     s = dict(snap) if snap else None
     stores = sorted(({"retailer": x["retailer"], "price": round(x["price"] * (x.get("pack_qty") or 1), 2),
-                      "verified": "size not stated" not in (x.get("note") or ""), "url": x.get("url") or ""}
+                      "verified": _verified(x.get("note")), "url": x.get("url") or ""}
                      for x in sources if x.get("price") is not None and x.get("in_stock") != 0), key=lambda x: x["price"])
     enr = _enrichment(conn, asin)
     el = db.get_eligibility(conn, asin)
@@ -215,7 +221,7 @@ def list_view(conn, asin: str, cfg: Config | None = None) -> dict:
         "orders": {"orders": orders.get("orders") or 0},
         "stores": stores[:8],
         "best_source": {"retailer": sig.best_source["retailer"], "price": sig.best_source.get("unit_cost"),
-                        "verified": "size not stated" not in (sig.best_source.get("note") or "")} if sig.best_source else None,
+                        "verified": _verified(sig.best_source.get("note"))} if sig.best_source else None,
         "enrichment": {"gating_risk": enr.get("gating_risk"), "sold_in_stores": enr.get("sold_in_stores"),
                        "brand_type": enr.get("brand_type"), "likely_retailers": enr.get("likely_retailers") or []} if enr else None,
         "import_brand": looks_import(product["brand"], product["title"], enr),

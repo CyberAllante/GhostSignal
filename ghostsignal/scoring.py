@@ -316,6 +316,10 @@ def score_product(product: dict, snapshot: dict | None, sources: list[dict], ord
     if amazon_only and verdict != "PASS":
         verdict = "PASS"
     # A store price whose size we couldn't confirm can't make a BUY on its own.
+    if best and "may be old" in (best.get("note") or ""):
+        flags.append(f"Store price at {best['retailer']} comes from a barcode database and may be old: check the current price before buying")
+        if verdict == "BUY":
+            verdict = "RESEARCH"
     if best and "size not stated" in (best.get("note") or ""):
         flags.append(f"Store price at {best['retailer']} is unverified (size not stated): confirm it's the same size before buying")
         if verdict == "BUY":

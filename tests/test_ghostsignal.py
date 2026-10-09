@@ -669,3 +669,20 @@ def test_knockoff_brands_are_not_sourceable():
     assert not looks_import("Hershey's", "Variety pack")
     assert not looks_import("SHISHUVIN", "x", {"brand_type": "national"})   # the AI's call wins
     assert not looks_import(None, "Brand not loaded yet")
+
+
+def test_barcode_offers_keep_recent_real_stores_and_scale_multipacks():
+    import time
+    from ghostsignal import upcdb
+    now = time.time()
+    item = {"title": "Vaseline Petroleum Jelly 13 oz", "offers": [
+        {"merchant": "Wal-Mart.com", "price": 4.5, "updated_t": now - 86400, "condition": "New", "link": "w"},
+        {"merchant": "Kmart", "price": 1.0, "updated_t": now - 86400 * 900, "condition": "New"},          # stale
+        {"merchant": "Rakuten(Buy.com)", "price": 2.0, "updated_t": now, "condition": "New"},             # not a store
+        {"merchant": "Target", "price": 3.9, "updated_t": now - 86400 * 5, "condition": "New", "link": "t"}]}
+    out = upcdb.offers_for(item, "Vaseline Petroleum Jelly 13 oz (Pack of 3)")
+    assert [o["retailer"] for o in out] == ["target", "walmart"]
+    assert out[0]["pack_qty"] == 3                       # Amazon pack of 3 on the single jar's barcode
+    from ghostsignal.engine import _verified
+    assert not _verified("barcode match · same size · price from 2026-10-01, may be old")
+    assert _verified("shopping · 90% match · same size: x")

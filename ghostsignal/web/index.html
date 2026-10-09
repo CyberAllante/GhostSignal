@@ -390,7 +390,7 @@ function hotTiers(list) {
     check: ung.filter((p) => hasGap(p) && !p.best_source.verified),
     shelf,
     leads: ung.filter((p) => !hasGap(p) && !shelf.includes(p)),
-    approval: leads.filter((p) => p.gated === "approval"),
+    approval: leads.filter((p) => p.gated === "approval").sort((a, b) => !!hasGap(b) - !!hasGap(a) || a.snapshot.sales_rank - b.snapshot.sales_rank),
   };
 }
 const storeChips = (p) => (p.stores || []).length
@@ -417,18 +417,18 @@ async function pageHot() {
   const t = hotTiers(products);
   const budget = await api("/api/stores/budget").catch(() => ({}));
   $("#navHot").textContent = (t.diamonds.length + t.bangers.length + t.check.length) || "";
-  const section = (title, sub, rows, empty) => `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
+  const section = (title, sub, rows, empty) => !rows.length ? `<div class="card empty-sec" style="margin-bottom:12px;padding:12px 18px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b>${title}</b><span class="dim">0</span><span class="dim" style="font-size:13px">${empty}</span></div>` : `<div class="card" style="margin-bottom:24px"><div class="card-h"><div><h2>${title} <span class="dim" style="font-weight:400">${rows.length}</span></h2><p>${sub}</p></div></div>
     <div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Sells</th><th class="num">Rank</th><th class="num">Sellers</th><th class="num">Buy under</th><th>Best store price</th><th class="num">Profit</th></tr></thead>
     <tbody>${rows.length ? rows.slice(0, 100).map(hotRow).join("") : `<tr><td colspan="7"><div class="empty">${empty}</div></td></tr>`}</tbody></table></div></div>`;
   if (!paint(seq, `
     <div class="page-head"><div><h1>Hot</h1><p>${HOT_RULES}. Updates live as new data comes in.${budget.left != null ? ` <b>${budget.left} store searches left this month</b> (each Check stores uses 1 to 3).` : ""}</p></div>
       <div class="actions"><button class="btn" onclick="discoverMore()">${icon("search")}Find more products</button><button class="btn primary" onclick="scan()">${icon("refresh")}Refresh data</button></div></div>
-    ${section("💎 Diamonds", "Go buy. A store has the same size under your buy-under price, you can sell it, and a new seller already lists it (or there are 8 or fewer sellers).", t.diamonds, "No diamonds yet. A diamond needs a confirmed store price, so run Check stores on the shelf-check list below.")}
-    ${section("🔥 Bangers", "Also a buy: confirmed store price under your buy-under, just more sellers on the listing.", t.bangers, "None yet.")}
-    ${section("Check the size", "A store has it under your max cost, but the store listing doesn't state the size. Confirm it's the same pack.", t.check, "Nothing waiting on a size check.")}
-    ${section("🛒 New sellers are selling these", "Real store brands that a zero-feedback seller lists and you can sell. No store price confirmed yet, so not a buy: click Check stores, or check the shelf (Trader Joe's and Costco aren't online).", t.shelf, "None right now. Pull more sellers from the Sellers page.")}
-    ${section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products.")}
-    ${section("One approval away", "Pass every filter but need an approval first. Click a row, then Apply from the product.", t.approval, "None.")}`)) return;
+    ${[section("💎 Diamonds", "Go buy. A store has the same size under your buy-under price, you can sell it, and a new seller already lists it (or there are 8 or fewer sellers).", t.diamonds, "No diamonds yet. A diamond needs a confirmed store price, so run Check stores on the shelf-check list below."),
+      section("🔥 Bangers", "Also a buy: confirmed store price under your buy-under, just more sellers on the listing.", t.bangers, "None yet."),
+      section("Check the price", "A store had it under your buy-under, but it isn't confirmed: either the store listing doesn't state the size, or the price comes from a barcode database and may be old. Open the store link and confirm.", t.check, "Nothing waiting on a check."),
+      section("🛒 New sellers are selling these", "Real store brands that a zero-feedback seller lists and you can sell. No store price confirmed yet, so not a buy: click Check stores, or check the shelf (Trader Joe's and Costco aren't online).", t.shelf, "None right now. Pull more sellers from the Sellers page."),
+      section("Hot leads", "Pass every filter and you can sell them. No store under the max cost found yet: look on Walmart, Target, Sam's.", t.leads, "No leads yet. Run Find more products."),
+      section("One approval away", "Pass every filter but need an approval first. Ones with a store price under buy-under come first: those are the approvals worth chasing. Click a row, then Apply.", t.approval, "None.")].sort((x, y) => x.includes('empty-sec') - y.includes('empty-sec')).join("")}`)) return;
   $("#main").querySelectorAll("[data-check]").forEach((btn) => (btn.onclick = (ev) => { ev.stopPropagation(); startPriceCheck(btn.dataset.check); }));
   if (Object.values(priceJobs).includes("running")) pollPrices();
 }
